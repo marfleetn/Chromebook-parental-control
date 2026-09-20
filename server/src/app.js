@@ -16,7 +16,7 @@ import {
   addUsage, usageRowsSince, usageTotalBetween, purgeUsageOlderThan, formatCode, makeCode, normalizeCode,
 } from './db.js';
 import { effectivePolicyForKid, kidStatus, dayStartMs } from './status.js';
-import { makeRequirePin, RateLimiter, hashPin, pinProblem } from './auth.js';
+import { makeRequirePin, makeRequestLimiter, RateLimiter, hashPin, pinProblem } from './auth.js';
 import {
   validatePolicy, validateName, validateAgentId, validTimeZone, clampInt, LIMITS,
 } from './validate.js';
@@ -37,6 +37,7 @@ const DAY = 24 * 60 * 60 * 1000;
  *   corsOrigins     array of origins allowed to call the API cross-origin (default none)
  *   trustProxy      express 'trust proxy' setting (default false)
  *   retentionDays   purge usage older than this at startup / on purge() (0 = keep forever)
+ *   requestLimit    max API requests per client per minute before 429 (default 300)
  *   log             logger fn for warnings (default console.warn)
  */
 export function createApp(opts = {}) {
@@ -80,6 +81,8 @@ export function createApp(opts = {}) {
     next();
   });
   app.use(express.json({ limit: '256kb' }));
+  // Blanket per-client throttle on the whole API, ahead of any authorization.
+  app.use('/api', makeRequestLimiter({ limit: Number(opts.requestLimit) > 0 ? Number(opts.requestLimit) : 300 }));
 
   // ---- guardian PIN source ---------------------------------------------------
   const envPin = opts.guardianPin || null;

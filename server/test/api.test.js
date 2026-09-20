@@ -54,6 +54,25 @@ test('parent routes need the guardian PIN; device + health routes do not', async
   assert.equal((await anon.get('/api/devices/BBBBBBBB')).status, 404);
 });
 
+test('every API route is throttled per client ahead of authorization', async (t) => {
+  const { anon, parent } = fixture(t, { requestLimit: 5 });
+  for (let i = 0; i < 5; i++) assert.equal((await anon.get('/api/health')).status, 200);
+  const r = await anon.get('/api/health');
+  assert.equal(r.status, 429);
+  assert.equal(r.body.code, 'rate-limited');
+  assert.ok(r.headers['retry-after']);
+  assert.equal((await parent.get('/api/kids')).status, 429, 'PIN routes are behind the same throttle');
+});
+
+test('Bearer header parsing is strict and regex-free', async (t) => {
+  const { app } = fixture(t);
+  assert.equal((await request(app).get('/api/kids').set('Authorization', 'bearer ' + PIN)).status, 200);
+  assert.equal((await request(app).get('/api/kids').set('Authorization', 'Bearer    ' + PIN + '  ')).status, 200);
+  assert.equal((await request(app).get('/api/kids').set('Authorization', 'Basic ' + PIN)).status, 401);
+  assert.equal((await request(app).get('/api/kids').set('Authorization', 'Bearer')).status, 401);
+  assert.equal((await request(app).get('/api/kids').set('Authorization', 'Bearer ' + ' '.repeat(600))).status, 401);
+});
+
 test('PIN brute force is rate limited per client', async (t) => {
   const { as, parent } = fixture(t);
   let last;

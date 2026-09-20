@@ -88,7 +88,7 @@ try {
   await page.click('button:has-text("Save policy")');
   await page.waitForSelector('.pill.ok:has-text("saved")');
   const pol = await fetch(`${base}/api/kids/1/policy`, { headers: { 'x-guardian-pin': PIN } }).then((r) => r.json());
-  check(pol.policy.deny.includes('tiktok.com') && pol.policy.dailyMinutes === 90, 'policy saved through the UI reached the API');
+  check(Array.isArray(pol.policy.deny) && pol.policy.deny.some((d) => d === 'tiktok.com') && pol.policy.dailyMinutes === 90, 'policy saved through the UI reached the API');
 
   // Devices: generate a code.
   await page.click('.tab:has-text("Devices")');

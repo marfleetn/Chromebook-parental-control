@@ -1,7 +1,7 @@
 // @chpc/server — request validation. Strict allow-listing: unknown policy
 // keys are dropped, every list is bounded, every string is trimmed and
 // lowercased where the engine compares lowercase. Errors are `{error, field}`.
-import { getHost } from '@chpc/core';
+import { getHost, stripStars } from '@chpc/core';
 
 export const LIMITS = {
   name: 60,
@@ -34,7 +34,7 @@ export function normalizePattern(raw) {
   const p = raw.trim().toLowerCase();
   if (!p || p.length > LIMITS.pattern) return null;
   if (p === '*') return p;
-  const core = p.replace(/\*+$/, '').replace(/^\*+\.?/, '');
+  const core = stripStars(p);
   if (!core) return null;
   const host = getHost(core);
   if (!host || /\s/.test(host)) return null;

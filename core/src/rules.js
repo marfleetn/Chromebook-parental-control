@@ -46,7 +46,7 @@
  * condition. Descriptions live in `describeRules()` for debugging/tests.
  */
 import { dayAllowed, inWindow, isOffDay, parseHM, localClock } from './time.js';
-import { getHost, isLocalHost } from './site.js';
+import { getHost, isLocalHost, stripStars } from './site.js';
 
 export const LOCK_PAGE = 'pages/blocked.html';
 
@@ -98,7 +98,7 @@ export function patternToHost(pattern) {
   if (typeof pattern !== 'string') return null;
   let p = pattern.trim().toLowerCase();
   if (!p || p === '*') return null;
-  p = p.replace(/\*+$/, '').replace(/^\*+\.?/, '');
+  p = stripStars(p);
   if (!p) return null;
   const host = getHost(p);
   if (!host || isLocalHost(host)) return null;
