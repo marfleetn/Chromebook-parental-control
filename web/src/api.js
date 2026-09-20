@@ -56,6 +56,12 @@ async function req(path, opts = {}) {
 
 export const api = {
   health: () => req("/health"),
+  /** Public: does the server still need its first-run PIN setup? */
+  setupStatus: () => req("/setup/status", { pin: "" }),
+  /** First-run: exchange the one-time setup code for a stored PIN. */
+  setup: (setupCode, pin) => req("/setup", { method: "POST", body: { setupCode, pin }, pin: "", quiet: true }),
+  /** Change the PIN (needs the current PIN in the header, as every parent call does). */
+  changePin: (pin) => req("/auth/pin", { method: "PUT", body: { pin } }),
   /** Verify a PIN without storing it. */
   checkPin: (pin) => req("/auth/check", { pin, quiet: true }),
   getSettings: () => req("/settings"),

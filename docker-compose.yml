@@ -1,20 +1,21 @@
-# CHPC — run at home:
-#   cp .env.example .env   # set CHPC_GUARDIAN_PIN
-#   docker compose up -d --build
-# Console + API: http://<host>:4100
+# CHPC — run at home with the prebuilt image (no build step):
+#   docker compose up -d
+#   docker compose logs chpc        # shows the one-time SETUP CODE on first run
+# Console + API: http://<host>:4100  → open it, enter the setup code, choose your PIN.
+#
+# To build from source instead:  docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 services:
   chpc:
-    build: .
-    image: chpc:latest
+    image: ghcr.io/marfleetn/chromebook-parental-control:latest
     container_name: chpc
     ports:
       - "4100:4100"
     environment:
-      # Compose aborts with a clear message if the PIN is missing from .env.
-      CHPC_GUARDIAN_PIN: ${CHPC_GUARDIAN_PIN:?set CHPC_GUARDIAN_PIN in .env (6+ characters)}
       CHPC_RETENTION_DAYS: ${CHPC_RETENTION_DAYS:-90}
       CHPC_TRUST_PROXY: ${CHPC_TRUST_PROXY:-0}
       CHPC_CORS_ORIGINS: ${CHPC_CORS_ORIGINS:-}
+      # Advanced: fix the PIN here instead of choosing it in the console.
+      CHPC_GUARDIAN_PIN: ${CHPC_GUARDIAN_PIN:-}
     volumes:
       - chpc-data:/data
     restart: unless-stopped

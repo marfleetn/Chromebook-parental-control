@@ -29,9 +29,10 @@ chpc/
 │   └── test/                  policy.test.js · rules.test.mjs
 ├── server/                    @chpc/server — Express 4 + node:sqlite
 │   ├── src/
-│   │   ├── index.js           process entry: env → createApp(); refuses unsafe config
-│   │   ├── app.js             createApp(opts) → { app, db, purge }; all routes
-│   │   ├── auth.js            makeRequirePin(), RateLimiter, pinProblem()
+│   │   ├── index.js           process entry: env → createApp(); prints the setup code; refuses unsafe config
+│   │   ├── app.js             createApp(opts) → { app, db, purge, getSetupCode, needsSetup }; all routes
+│   │   ├── auth.js            makeRequirePin(), RateLimiter, pinProblem(), hashPin()/verifyPinHash() (scrypt)
+│   │   ├── cli.js             `status` / `reset-pin` maintenance commands
 │   │   ├── validate.js        validatePolicy(), validateName(), validateAgentId(), validTimeZone()
 │   │   ├── db.js              schema, CRUD, pairing codes, usage, retention purge
 │   │   ├── status.js          dayStartMs(), effectivePolicyForKid(), kidStatus()
@@ -45,19 +46,21 @@ chpc/
 │       ├── api.js             fetch client; PIN storage; 401 broadcast
 │       ├── fmt.js             formatting helpers
 │       ├── style.css          paper / ink / brass theme
-│       └── components/        PinGate · KidList · KidDetail (Policy/Devices/Usage tabs) · SettingsDrawer
+│       └── components/        SetupScreen · PinGate · KidList · KidDetail (Policy/Devices/Usage tabs) · SettingsDrawer
 ├── extension/                 Chrome MV3 extension (load unpacked)
 │   ├── manifest.json          module service worker; permissions below
 │   ├── background.js          tick loop, DNR application, metering, messages
 │   ├── popup.html / popup.js  pairing, status, PIN-gated unpair
 │   ├── pages/blocked.html/.js lock page
 │   └── vendor/core.js         esbuild bundle of @chpc/core (committed; rebuild with npm run build:ext)
+├── install.sh                 one-line installer: Node 22, build, systemd service, `chpc` helper
 ├── scripts/
+│   ├── chpc-ctl.sh            the `chpc` helper (status/logs/update/reset-pin/restart)
 │   ├── build-ext.mjs          bundles core → extension/vendor/core.js, lints the manifest, rejects inline scripts
 │   ├── e2e-extension.mjs      real-Chromium end-to-end check (Playwright)
 │   └── e2e-console.mjs        console smoke test (Playwright)
 ├── docs/                      HLD.md · LLD.md · USER-GUIDE.md · SECURITY-REPORT.md
-├── Dockerfile · docker-compose.yml · .env.example · SECURITY.md
+├── Dockerfile · docker-compose.yml (prebuilt image) · docker-compose.build.yml · .env.example · SECURITY.md
 └── package.json               npm workspaces: core, server, web
 ```
 
@@ -160,13 +163,23 @@ at start-up and every 6 h (`CHPC_RETENTION_DAYS`, default 90, 0 = never).
 
 ### 3.2 Authentication (auth.js)
 
-- `makeRequirePin({ pin, allowNoPin, limiter })` → middleware mounted on
+- PIN source, first match wins: `CHPC_GUARDIAN_PIN` (env) → `settings.pinHash`
+  (scrypt, written by first-run setup or a PIN change) → none = **setup required**.
+- `makeRequirePin({ getPin, allowNoPin, limiter })` → middleware mounted on
   `/api/auth`, `/api/settings`, `/api/kids`. Accepts `X-Guardian-PIN: <pin>` or
-  `Authorization: Bearer <pin>`. SHA-256 + `timingSafeEqual`. Responses:
-  `401 {code:'pin-required'|'pin-wrong'}`, `429` after 10 failures per IP in
-  15 min (`Retry-After`), `503` when no PIN is configured and `allowNoPin` is
-  false.
-- `pinProblem(pin)` — start-up check: ≥ 6 chars, not repeated/sequential.
+  `Authorization: Bearer <pin>`. Env PINs: SHA-256 + `timingSafeEqual`; stored
+  PINs: scrypt verify, with the digest of the last good PIN cached in memory so
+  scrypt runs once per process, not per request (`invalidate()` on change).
+  Responses: `401 {code:'pin-required'|'pin-wrong'}`, `429 {code:'locked-out'}`
+  after 10 failures per IP in 15 min (`Retry-After`), `503 {code:'setup-required'}`
+  while no PIN exists (unless `allowNoPin`).
+- First-run setup: while no PIN exists `createApp` mints a one-time 8-letter
+  code (`makeCode()`), returns it via `getSetupCode()` and writes it `0600` to
+  `setupCodeFile` (next to the DB). `POST /api/setup` consumes it (constant-time
+  compare, 10 attempts per IP per 15 min) and stores the scrypt hash; the file
+  is then removed. `index.js` prints the code in a banner.
+- `pinProblem(pin)` — ≥ 6 chars, ≤ 128, not repeated/sequential. Applied to env
+  PINs at start-up and to every PIN chosen in the console.
 - `RateLimiter` — in-memory sliding window keyed by `req.ip`; also used for
   unknown pairing codes (20 per 15 min).
 
@@ -186,8 +199,11 @@ Auth column: **P** = guardian PIN, **C** = pairing code in path, — = public.
 | Method & path | Auth | Body / query | Returns |
 | ------------- | ---- | ------------ | ------- |
 | `GET /api/health` | — | | `{ ok, service }` |
-| `GET /api/auth/check` | P | | `{ ok }` |
-| `GET /api/settings` | P | | `{ timezone, retentionDays }` |
+| `GET /api/setup/status` | — | | `{ needsSetup, pinSource: 'env'\|'db'\|'none' }` |
+| `POST /api/setup` | setup code | `{ setupCode, pin }` | `201 { ok, pinSource:'db' }`; `401 setup-code-wrong`, `400` weak PIN, `409 already-set-up`, `429` |
+| `GET /api/auth/check` | P | | `{ ok, pinSource }` |
+| `PUT /api/auth/pin` | P | `{ pin }` | `{ ok }`; `400` weak, `409 pin-managed-by-env` |
+| `GET /api/settings` | P | | `{ timezone, retentionDays, pinSource }` |
 | `PUT /api/settings` | P | `{ timezone }` | same (400 on invalid zone) |
 | `GET /api/kids` | P | | `{ kids: [{ id, name, createdAt, status, devices[] }] }` |
 | `POST /api/kids` | P | `{ name }` | `201 { kid }` |
@@ -220,17 +236,20 @@ for non-API GETs that accept HTML.
 | Var | Default | Meaning |
 | --- | ------- | ------- |
 | `PORT` | `4100` | listen port |
-| `HOST` | `127.0.0.1` | bind address; loopback + no PIN → unauthenticated dev mode with a warning; non-loopback + no/weak PIN → **exit 1** |
-| `CHPC_GUARDIAN_PIN` | unset | parent PIN |
+| `HOST` | `127.0.0.1` | bind address (installer and Docker use `0.0.0.0`) |
+| `CHPC_GUARDIAN_PIN` | unset | advanced: fixed PIN; weak value → **exit 1**. Unset → stored PIN or first-run setup |
+| `CHPC_ALLOW_NO_PIN` | off | developers: no PIN at all; refused on non-loopback hosts |
 | `CHPC_DB` | `./data/chpc.db` | SQLite file |
 | `CHPC_PUBLIC_DIR` | unset | built console to serve |
 | `CHPC_RETENTION_DAYS` | `90` | usage retention, 0 = forever |
 | `CHPC_CORS_ORIGINS` | none | comma-separated allowed origins |
 | `CHPC_TRUST_PROXY` | off | `1` behind a reverse proxy |
 
-### 3.6 Tests (`server/test/api.test.js`, 24)
+### 3.6 Tests (`server/test/api.test.js`, 29)
 
-Auth (401/429/503, Bearer), rate limits, headers/CORS, malformed/oversize
+Auth (401/429/503, Bearer), first-run setup (code file, wrong/weak/right,
+single use, restart pickup, rate limit), PIN change (db vs env), scrypt
+helpers, rate limits, headers/CORS, malformed/oversize
 bodies, settings, kids CRUD + name rules, policy normalisation + 25 rejected
 shapes, pairing flow + code normalisation + revoke, usage single/batch/caps/
 server clock/hostname-only, today + history aggregation, cascade delete,
@@ -241,14 +260,16 @@ retention purge, static console fallback.
 - `api.js` — `req()` adds `X-Guardian-PIN` from `pinStore`, throws `ApiError
   { status, code, field }`, broadcasts 401s via `onUnauthorized()`.
 - `App.jsx` — hash router (`#/`, `#/kid/:id`), health + settings polling every
-  30 s, `PinGate` until `/api/auth/check` succeeds, Lock button clears the PIN.
+  30 s; `SetupScreen` while the server answers `setup-required`, then `PinGate`
+  until `/api/auth/check` succeeds; Lock button clears the PIN.
+- `SetupScreen.jsx` — setup code + new PIN (twice); explains where the code is.
 - `KidList.jsx` — add/delete children; device count, last seen, budget meter.
 - `KidDetail.jsx` — rename; tabs: **Policy** (master switch, mode + approved
   list, daily limit, off days incl. one-off dates, allowed hours, blocked
   sites, per-site limits; unsaved-changes indicator), **Devices** (paired list
   with last seen, generate code + console address hint, revoke, test a
   decision), **Usage** (today, top sites, 7-day bars).
-- `SettingsDrawer.jsx` — time zone with live preview; data & privacy summary.
+- `SettingsDrawer.jsx` — time zone with live preview; change PIN (hidden when the PIN comes from the environment); data & privacy summary.
 - Build: `vite build` → `web/dist`, served by the server (`CHPC_PUBLIC_DIR`).
 
 ## 5. Extension
@@ -289,12 +310,23 @@ the host, falls back to `CHPC_WHY`, has a Go back button.
 
 - `Dockerfile` — multi-stage `node:22-alpine`: build console → slim runtime,
   `npm ci --omit=dev`, non-root `chpc` user, `/data` volume, health check.
-- `docker-compose.yml` — one service; **requires** `CHPC_GUARDIAN_PIN` in
-  `.env` (compose aborts otherwise); optional `CHPC_RETENTION_DAYS`, `CHPC_TZ`.
-- `.github/workflows/ci.yml` — Node 22: `npm ci`, `npm test`, `npm run build`,
-  `npm audit --omit=dev`.
+- `docker-compose.yml` — one service from the **prebuilt image**
+  `ghcr.io/marfleetn/chromebook-parental-control:latest`; no PIN needed up
+  front (first-run setup; code in `docker compose logs`). Hardened: read-only
+  root FS, all capabilities dropped, `no-new-privileges`.
+  `docker-compose.build.yml` overrides to build from source.
+- `install.sh` — apt-based systems with systemd: installs Node 22 if < 22,
+  downloads `CHPC_REF` (default `main`) tarball, `npm ci && npm run build &&
+  npm prune --omit=dev`, installs to `/opt/chpc`, data in `/var/lib/chpc`
+  (0700, user `chpc`), settings in `/etc/chpc/chpc.env` (0600), hardened
+  systemd unit, `/usr/local/bin/chpc` helper; prints URL, QR (if `qrencode`)
+  and the setup code. Idempotent: re-running upgrades in place.
+- `.github/workflows/ci.yml` — Node 22: `npm ci`, `check`, `test`, `build`,
+  bundle freshness, `npm audit --omit=dev`, Docker build.
+- `.github/workflows/publish.yml` — multi-arch image to GHCR on `main` and
+  `v*` tags; extension zip attached to `v*` releases.
 - Root scripts: `test`, `check`, `build`, `build:web`, `build:ext`, `start`,
-  `dev`, `dev:web`, `audit:prod`, `e2e:ext`, `e2e:web`.
+  `dev`, `dev:web`, `audit:prod`, `e2e:ext`, `e2e:web`, `cli`.
 
 ## 7. Known gaps / follow-ups
 

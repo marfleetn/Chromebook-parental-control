@@ -8,11 +8,28 @@ const COMMON = [
   "Australia/Sydney", "Asia/Tokyo", "Asia/Singapore", "Asia/Dubai",
 ];
 
-export default function SettingsDrawer({ timezone, retentionDays, onSave, onClose }) {
+export default function SettingsDrawer({ timezone, retentionDays, pinSource, onChangePin, onSave, onClose }) {
   const [value, setValue] = useState(timezone || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pin2, setPin2] = useState("");
+  const [pinMsg, setPinMsg] = useState(null);
+  const [pinErr, setPinErr] = useState(null);
+  const [pinBusy, setPinBusy] = useState(false);
+
+  const savePin = async () => {
+    setPinBusy(true); setPinErr(null); setPinMsg(null);
+    try {
+      await onChangePin(pin);
+      setPin(""); setPin2("");
+      setPinMsg("PIN changed. Every browser and Chromebook popup will need the new one.");
+    } catch (e) {
+      setPinErr(e.message || String(e));
+    }
+    setPinBusy(false);
+  };
 
   const preview = useMemo(() => {
     try {
@@ -67,6 +84,29 @@ export default function SettingsDrawer({ timezone, retentionDays, onSave, onClos
             <button className="btn ghost" onClick={onClose}>Close</button>
             <button className="btn" onClick={save} disabled={busy || !preview}>{busy ? "Saving…" : "Save"}</button>
           </div>
+        </div>
+
+        <div className="card">
+          <h3>Guardian PIN</h3>
+          {pinSource === "env" ? (
+            <p style={{ fontSize: ".86rem", color: "var(--ink-soft)", margin: 0 }}>
+              The PIN is fixed by <code>CHPC_GUARDIAN_PIN</code> on the server. Change it there and restart.
+            </p>
+          ) : (
+            <>
+              <label htmlFor="pin-new">New PIN <span className="mono">(6+ characters)</span></label>
+              <input id="pin-new" type="password" autoComplete="new-password" value={pin} onChange={(e) => setPin(e.target.value)} />
+              <label htmlFor="pin-new2">Repeat</label>
+              <input id="pin-new2" type="password" autoComplete="new-password" value={pin2} onChange={(e) => setPin2(e.target.value)} />
+              {pinErr && <div className="banner error" style={{ marginTop: 12 }}>{pinErr}</div>}
+              {pinMsg && <div className="banner ok" style={{ marginTop: 12 }}>{pinMsg}</div>}
+              <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                <button className="btn" onClick={savePin} disabled={pinBusy || pin.length < 6 || pin !== pin2}>
+                  {pinBusy ? "Saving…" : "Change PIN"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="card">

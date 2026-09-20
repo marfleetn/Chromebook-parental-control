@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
-import { RateLimiter, pinProblem } from '../src/auth.js';
+import { RateLimiter, pinProblem, hashPin, verifyPinHash } from '../src/auth.js';
 import { validatePolicy, normalizePattern } from '../src/validate.js';
 import { makeCode, normalizeCode, formatCode, openDb, addUsage, purgeUsageOlderThan, createKid } from '../src/db.js';
 
@@ -80,6 +80,99 @@ test('no PIN configured -> parent routes 503 unless allowNoPin (loopback dev mod
   assert.equal(r.status, 503);
   const b = fixture(t, { guardianPin: null, allowNoPin: true });
   assert.equal((await b.anon.get('/api/kids')).status, 200);
+});
+
+test('first-run setup: setup code required, then the chosen PIN unlocks parent routes', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chpc-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const codeFile = path.join(dir, 'setup-code.txt');
+  const { anon, as, app, db, getSetupCode, needsSetup } = fixture(t, { guardianPin: null, setupCode: 'KTRMXPBD', setupCodeFile: codeFile });
+  assert.equal(needsSetup(), true);
+  assert.equal(getSetupCode(), 'KTRMXPBD');
+  assert.equal(fs.readFileSync(codeFile, 'utf8').trim(), 'KTRMXPBD', 'setup code written to file');
+  assert.equal((fs.statSync(codeFile).mode & 0o777), 0o600);
+
+  let r = await anon.get('/api/setup/status');
+  assert.deepEqual(r.body, { needsSetup: true, pinSource: 'none' });
+  r = await anon.get('/api/kids');
+  assert.equal(r.status, 503);
+  assert.equal(r.body.code, 'setup-required');
+  r = await as('anything').get('/api/kids');
+  assert.equal(r.status, 503, 'no PIN can unlock before setup');
+
+  r = await anon.post('/api/setup').send({ setupCode: 'WRONGCODE', pin: 'family-2026' });
+  assert.equal(r.status, 401);
+  assert.equal(r.body.code, 'setup-code-wrong');
+  r = await anon.post('/api/setup').send({ setupCode: 'ktrm-xpbd', pin: '123456' });
+  assert.equal(r.status, 400, 'weak PIN rejected even with the right code');
+  assert.equal(r.body.field, 'pin');
+  r = await anon.post('/api/setup').send({ setupCode: 'ktrm-xpbd', pin: 'family-2026' });
+  assert.equal(r.status, 201);
+  assert.equal(r.body.pinSource, 'db');
+  assert.ok(!fs.existsSync(codeFile), 'setup code file removed');
+  assert.equal(getSetupCode(), null);
+  assert.match(db.prepare("SELECT json FROM settings WHERE key='pinHash'").get().json, /scrypt\$/);
+
+  r = await anon.get('/api/setup/status');
+  assert.deepEqual(r.body, { needsSetup: false, pinSource: 'db' });
+  r = await anon.post('/api/setup').send({ setupCode: 'ktrm-xpbd', pin: 'other-pin-99' });
+  assert.equal(r.status, 409, 'setup is single use');
+
+  assert.equal((await as('family-2026').get('/api/kids')).status, 200);
+  assert.equal((await as('family-2026').get('/api/kids')).status, 200, 'cached verification path');
+  assert.equal((await as('family-2027').get('/api/kids')).status, 401);
+  assert.equal((await anon.get('/api/kids')).status, 401);
+
+  // Change the PIN from the console (needs the current PIN).
+  r = await as('family-2026').put('/api/auth/pin').send({ pin: 'aaaaaa' });
+  assert.equal(r.status, 400);
+  r = await as('family-2026').put('/api/auth/pin').send({ pin: 'new-pin-2027' });
+  assert.equal(r.status, 200);
+  assert.equal((await as('family-2026').get('/api/kids')).status, 401, 'old PIN no longer works');
+  assert.equal((await as('new-pin-2027').get('/api/kids')).status, 200);
+  const settings = await request(app).get('/api/settings').set('x-guardian-pin', 'new-pin-2027');
+  assert.equal(settings.body.pinSource, 'db');
+});
+
+test('setup code guessing is rate limited', async (t) => {
+  const { anon } = fixture(t, { guardianPin: null, setupCode: 'KTRMXPBD' });
+  let r;
+  for (let i = 0; i < 10; i++) r = await anon.post('/api/setup').send({ setupCode: 'BBBBBBB' + 'BCDFGHJKLM'[i], pin: 'family-2026' });
+  assert.equal(r.status, 401);
+  r = await anon.post('/api/setup').send({ setupCode: 'KTRMXPBD', pin: 'family-2026' });
+  assert.equal(r.status, 429, 'even the right code is refused while locked out');
+});
+
+test('env PIN wins over a stored hash and cannot be changed from the console', async (t) => {
+  const { as, parent } = fixture(t);
+  const r = await parent.put('/api/auth/pin').send({ pin: 'new-pin-2027' });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.code, 'pin-managed-by-env');
+  assert.equal((await as('new-pin-2027').get('/api/kids')).status, 401);
+  assert.equal((await as(PIN).get('/api/settings')).body.pinSource, 'env');
+});
+
+test('a stored hash from a previous run is picked up on restart', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chpc-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'chpc.db');
+  const first = createApp({ dbFile: file, guardianPin: null, setupCode: 'KTRMXPBD', log: () => {} });
+  await request(first.app).post('/api/setup').send({ setupCode: 'KTRMXPBD', pin: 'family-2026' });
+  first.db.close();
+  const second = createApp({ dbFile: file, guardianPin: null, log: () => {} });
+  t.after(() => second.db.close());
+  assert.equal(second.needsSetup(), false);
+  assert.equal(second.getSetupCode(), null);
+  assert.equal((await request(second.app).get('/api/kids').set('x-guardian-pin', 'family-2026')).status, 200);
+});
+
+test('hashPin / verifyPinHash', () => {
+  const h = hashPin('family-2026');
+  assert.match(h, /^scrypt\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
+  assert.ok(verifyPinHash('family-2026', h));
+  assert.ok(!verifyPinHash('family-2027', h));
+  assert.ok(!verifyPinHash('family-2026', 'garbage'));
+  assert.notEqual(hashPin('family-2026'), h, 'fresh salt each time');
 });
 
 test('pinProblem rejects weak or missing PINs', () => {

@@ -22,7 +22,8 @@
     "check": "node --check server/src/*.js core/src/*.js extension/*.js extension/pages/*.js scripts/*.mjs",
     "audit:prod": "npm audit --omit=dev",
     "e2e:ext": "node scripts/e2e-extension.mjs",
-    "e2e:web": "node scripts/e2e-console.mjs"
+    "e2e:web": "node scripts/e2e-console.mjs",
+    "cli": "node server/src/cli.js"
   },
   "license": "MIT",
   "devDependencies": {

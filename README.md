@@ -2,69 +2,76 @@
 
 Self-hosted parental control for family Chromebooks. A parent sets rules from a
 web console; a Chrome **extension enforces** them on each child's Chromebook and
-reports usage. No third-party cloud: the machine running this repo (a laptop, a
-Chromebook in Linux mode, a small server or a Docker host) is the source of truth.
+reports usage. No third-party cloud: the machine running this repo (a Raspberry
+Pi, a laptop, a Chromebook in Linux mode, a NAS or any Docker host) is the
+source of truth.
+
+## Install in one line
+
+On a Debian/Ubuntu/Raspberry Pi OS machine, or inside a Chromebook's Linux
+terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marfleetn/Chromebook-parental-control/main/install.sh | sudo bash
+```
+
+It installs Node 22 if needed, builds CHPC, sets it up as an always-on service
+and finishes by printing the console address, a QR code and a one-time **setup
+code**. Open the address in a browser, enter the code, choose your PIN. Done.
+Manage it later with `sudo chpc status | logs | update | reset-pin`.
+
+**Prefer Docker?** No build step: the image is published to GitHub Container Registry.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/marfleetn/Chromebook-parental-control/main/docker-compose.yml
+docker compose up -d
+docker compose logs chpc        # shows the setup code
+```
+
+Then, on each child's Chromebook, load the extension and pair it with a code
+from the console. Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## Packages
 
 | Path          | What it is                                                                          |
 | ------------- | ----------------------------------------------------------------------------------- |
 | `core/`       | Pure policy engine: `decide()` for verdicts, `buildDnrRules()` for Chrome rules. No deps. |
-| `server/`     | Express 4 + `node:sqlite` API: guardian PIN auth, kids, policies, pairing, usage.    |
+| `server/`     | Express 4 + `node:sqlite` API: guardian PIN auth, first-run setup, kids, policies, pairing, usage. |
 | `web/`        | React + Vite parent console (served by the server).                                  |
 | `extension/`  | Chrome Manifest V3 extension: applies the policy with declarativeNetRequest, meters usage. |
+| `install.sh`  | One-line installer (systemd service, `chpc` helper).                                 |
 | `docs/`       | [User guide](docs/USER-GUIDE.md) · [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) · [Security report](docs/SECURITY-REPORT.md) |
 
 ## Requirements
 
-- **Node.js ≥ 22** (uses the built-in `node:sqlite` module — no native build step).
-- npm 10+.
+- Server: **Node.js ≥ 22** (built-in `node:sqlite`, no native build) **or** Docker.
 - Chrome / ChromeOS **116 or newer** on each child device.
 
-## Quick start (development, this machine only)
+## Running from source (developers)
 
 ```bash
-npm install                 # installs all workspaces
-npm test                    # core + API tests (node:test)
-npm run build               # console bundle -> web/dist, extension bundle -> extension/vendor/core.js
+npm install
+npm test                    # 66 unit + integration tests
+npm run build               # console -> web/dist, extension bundle -> extension/vendor/core.js
 CHPC_PUBLIC_DIR=web/dist npm start
 ```
 
-The server listens on `http://127.0.0.1:4100`. Bound to the loopback address
-and with no PIN configured it serves the console **without** authentication,
-with a warning in the log — fine for trying it out on your own machine, never
-for a network-reachable install.
-
-## Quick start (family install)
-
-```bash
-cp .env.example .env        # then edit: at least CHPC_GUARDIAN_PIN
-docker compose up --build   # console on http://<host>:4100
-```
-
-Or without Docker:
-
-```bash
-npm install && npm run build
-HOST=0.0.0.0 CHPC_GUARDIAN_PIN='choose-a-real-pin' CHPC_PUBLIC_DIR=web/dist npm start
-```
-
-The server **refuses to start** on a non-loopback address without a PIN of at
-least 6 characters. Then, on each child Chromebook:
-
-1. `chrome://extensions` → **Developer mode** → **Load unpacked** → the `extension/` folder.
-2. In the console: add the child → **Devices** → **Generate code**.
-3. Click the extension icon on the Chromebook, enter the console address and the code.
-
-Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
+The server prints a setup code on first run; open http://127.0.0.1:4100 and
+choose a PIN. To skip the PIN entirely while developing, set
+`CHPC_ALLOW_NO_PIN=1` (honoured on loopback addresses only). Real-browser
+checks: `npm run e2e:ext` and `npm run e2e:web` (need Playwright + Chromium).
 
 ## Configuration
+
+Everything is optional. The installer writes these to `/etc/chpc/chpc.env`;
+Docker reads them from `.env`.
 
 | Variable              | Default          | Meaning                                                                 |
 | --------------------- | ---------------- | ----------------------------------------------------------------------- |
 | `PORT`                | `4100`           | Listen port.                                                            |
-| `HOST`                | `127.0.0.1`      | Bind address. `0.0.0.0` exposes it to the LAN (requires a PIN).         |
-| `CHPC_GUARDIAN_PIN`   | *(unset)*        | Parent PIN, ≥ 6 chars, not sequential/repeated. Required unless loopback. |
+| `HOST`                | `127.0.0.1`      | Bind address. `0.0.0.0` exposes it to the LAN (installer and Docker do this). |
+| `CHPC_GUARDIAN_PIN`   | *(unset)*        | Advanced: fix the PIN in config instead of choosing it in the console. ≥ 6 chars, not sequential/repeated. |
+| `CHPC_ALLOW_NO_PIN`   | *(off)*          | Developers only: no PIN at all. Loopback only.                          |
 | `CHPC_DB`             | `./data/chpc.db` | SQLite file. Created `0600` in a `0700` directory.                      |
 | `CHPC_PUBLIC_DIR`     | *(unset)*        | Built console directory to serve at `/`.                                |
 | `CHPC_RETENTION_DAYS` | `90`             | Usage rows older than this are purged (0 = keep forever).               |
@@ -97,10 +104,13 @@ Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## Security model
 
+- **First-run setup** is guarded by a one-time code that only the person with
+  access to the server's log or disk can see. Until a PIN exists, the parent
+  API answers "setup required" to everyone.
 - **Console and parent API** require the guardian PIN on every request
-  (`X-Guardian-PIN` header or `Authorization: Bearer`). The PIN is compared in
-  constant time against a SHA-256 kept in memory; ten failures from one address
-  lock that address out for 15 minutes.
+  (`X-Guardian-PIN` header or `Authorization: Bearer`). Stored PINs are scrypt
+  hashes; comparisons are constant time; ten failures from one address lock
+  that address out for 15 minutes. The PIN can be changed in Settings.
 - **Devices** authenticate with their pairing code: 8 characters from a
   22-letter alphabet, generated with a CSPRNG, revocable from the console.
   Unknown codes are rate-limited per address.
@@ -112,7 +122,8 @@ Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 - **Data minimisation**: only hostnames, never URLs; usage purged after 90 days
   by default; database file created with owner-only permissions.
 - **Transport**: HTTP on your LAN. To reach the console from outside the house,
-  put it behind a TLS reverse proxy (Caddy, nginx) and set `CHPC_TRUST_PROXY=1`.
+  put it behind a TLS reverse proxy (Caddy, nginx) or use Tailscale, and set
+  `CHPC_TRUST_PROXY=1` for a proxy.
 
 ### Known limits (read this)
 
@@ -130,15 +141,18 @@ See [docs/SECURITY-REPORT.md](docs/SECURITY-REPORT.md) for the full assessment.
 ## Development
 
 ```bash
-npm test              # 61 tests across core and server
+npm test              # 66 tests across core and server
 npm run check         # syntax-check every JS file
 npm run build:ext     # rebuild extension/vendor/core.js after touching core/
 npm run dev           # API with --watch; console dev server: npm run dev:web (proxies /api)
 npm run audit:prod    # dependency advisories for the runtime tree
+npm run cli -- status # or reset-pin (CHPC_DB points at the database)
 ```
 
-Set `CHPC_GUARDIAN_PIN` for `npm run dev` too, or the console will run
-unauthenticated on loopback.
+CI (`.github/workflows/ci.yml`) runs the checks, tests, builds and a
+production audit on every push; `publish.yml` pushes the Docker image to
+`ghcr.io/marfleetn/chromebook-parental-control` on `main` and attaches an
+extension zip to each `v*` release.
 
 ## Licence
 

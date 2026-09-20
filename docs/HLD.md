@@ -86,6 +86,13 @@ the extension, and both are unit-tested against the same fixtures.
 
 ## 5. Primary flows
 
+**5.0 First run (operator).** With no PIN configured, the server prints a
+one-time setup code (also written `0600` next to the database, and shown by
+the installer / `chpc status`). The console opens on a setup screen; the code
+plus a chosen PIN (`POST /api/setup`) stores a scrypt hash and retires the code.
+Until then every parent route answers `503 setup-required`. Advanced installs
+may still fix the PIN with `CHPC_GUARDIAN_PIN`.
+
 **5.1 Unlock (parent).** The console asks for the guardian PIN, verifies it with
 `GET /api/auth/check`, then sends it as `X-Guardian-PIN` on every parent
 request. It is kept in `sessionStorage` (or `localStorage` if the parent ticks
@@ -148,7 +155,7 @@ Wi-Fi can reach the port.
 
 | Concern | Control |
 | ------- | ------- |
-| Console / parent API exposure | Guardian PIN on every parent request; constant-time compare of SHA-256; 10 failures per address → 15-minute lockout. Server refuses to start network-reachable without a PIN ≥ 6 chars that is not trivially sequential/repeated. Loopback-only dev mode runs without a PIN and says so loudly. |
+| Console / parent API exposure | Guardian PIN on every parent request; env PINs compared as SHA-256 in constant time, stored PINs as scrypt hashes; 10 failures per address → 15-minute lockout. No PIN yet → all parent routes answer "setup required"; setup needs a one-time code visible only to whoever can read the server's log or disk. Weak PINs refused everywhere. Dev mode without a PIN is explicit (`CHPC_ALLOW_NO_PIN`) and loopback-only. |
 | Cross-site request forgery from a page the child visits | No CORS headers by default → browsers refuse cross-origin reads and block preflighted writes (PIN header forces preflight). Opt-in `CHPC_CORS_ORIGINS` for unusual setups. |
 | Clickjacking / injection in the console | `Content-Security-Policy` (self only, no inline scripts), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on the API. React escapes output; no `dangerouslySetInnerHTML`. |
 | Pairing code guessing | CSPRNG, 8 chars / 22 letters; unknown-code lookups rate-limited per address (20 per 15 min). Codes are revocable bearer credentials — treat like a password. |
@@ -161,10 +168,10 @@ Wi-Fi can reach the port.
 
 ## 8. Deployment scenarios
 
-1. **Try it on this machine** — `npm install && npm test && npm run build && CHPC_PUBLIC_DIR=web/dist npm start`; loopback, no PIN, warning logged.
-2. **Family install, bare Node** — `HOST=0.0.0.0 CHPC_GUARDIAN_PIN=… CHPC_PUBLIC_DIR=web/dist npm start`; extension loaded unpacked from `extension/` on each Chromebook.
-3. **Docker** — `cp .env.example .env`, set the PIN, `docker compose up --build`; one volume for `/data`, health check on `/api/health`, non-root user.
-4. **Remote access** — any of the above behind Caddy/nginx with TLS; never expose port 4100 directly to the internet.
+1. **One-line installer** (recommended) — `curl … install.sh | sudo bash` on Raspberry Pi / Debian / Ubuntu / Chromebook Linux: systemd service, `chpc` helper, prints URL + setup code.
+2. **Docker** — `docker compose up -d` with the prebuilt GHCR image; setup code in the logs; one volume for `/data`, health check, non-root, read-only.
+3. **From source** — `npm install && npm run build && HOST=0.0.0.0 CHPC_PUBLIC_DIR=web/dist npm start`; setup code in the terminal.
+4. **Remote access** — any of the above behind Caddy/nginx with TLS or via Tailscale; never expose port 4100 directly to the internet.
 
 ## 9. Status register
 
@@ -172,11 +179,12 @@ Wi-Fi can reach the port.
 | ---- | ------ | ----------- |
 | Core decision engine (`decide`) | Implemented | 13 unit tests |
 | Core DNR rule generator | Implemented, Chrome-schema-checked | 24 unit tests incl. schema assertions; real-Chromium e2e |
-| Server API, auth, validation, retention | Implemented | 24 integration tests (supertest) |
-| React console | Implemented | Vite production build; browser smoke test (`scripts/e2e-console.mjs`) |
+| Server API, auth, first-run setup, validation, retention | Implemented | 29 integration tests (supertest) |
+| React console | Implemented | Vite production build; browser smoke test (`scripts/e2e-console.mjs`) incl. first-run setup |
 | Chrome extension | Implemented | `scripts/e2e-extension.mjs`: pairs via popup, Chrome accepts rules, lock page reason, block-all, usage flush, PIN-gated unpair |
-| Docker + env example | Implemented | Image builds from the same sources; PIN required by compose |
-| Guardian PIN gate | **Implemented** | Auth tests; console PIN gate; popup unpair check |
+| Docker + env example | Implemented | Prebuilt multi-arch image published by CI; compose needs no secrets up front |
+| One-line installer | Implemented | `bash -n`; exercised manually on apt/systemd hosts (not in CI) |
+| Guardian PIN gate | **Implemented** | Auth + setup tests; console setup screen and PIN gate; popup unpair check |
 
 ## 10. Key design decisions (record)
 
@@ -191,3 +199,4 @@ Wi-Fi can reach the port.
 | D7 | declarativeNetRequest with per-minute recomputation | MV3 cannot block from `webRequest`; DNR has no time conditions, so time is evaluated in the engine each minute and expressed as rule presence. |
 | D8 | Rich regex rules with reason, plain rules as fallback, fail-closed last | The child sees *why*; Chrome's 2 kB compiled-regex budget and future API changes cannot leave the browser open. |
 | D9 | Hostnames only, 90-day retention | Data minimisation for a child's browsing record; enough for budgets and a week's history. |
+| D10 | PIN chosen in the browser, unlocked by a one-time setup code | Non-technical parents never edit config files; possession of the server's log/disk is the proof of ownership, so the LAN cannot claim an unset console. |

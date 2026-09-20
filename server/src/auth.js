@@ -6,12 +6,20 @@
 // as `X-Guardian-PIN: <pin>` or `Authorization: Bearer <pin>`. Device routes
 // authenticate with the pairing code in the path instead.
 //
-// The PIN is never stored; only its SHA-256 is kept in memory, and the
-// comparison is constant-time. Failed attempts are rate-limited per client
-// IP so a 6-digit PIN cannot be brute-forced over the LAN.
+// Where the PIN comes from (first match wins):
+//   1. CHPC_GUARDIAN_PIN in the environment (legacy / advanced installs);
+//   2. a scrypt hash stored in the database by the first-run setup screen;
+//   3. nothing yet -> "setup required": the server prints a one-time setup
+//      code and the console lets the parent choose a PIN with it.
+//
+// Verification: env PINs compare SHA-256 digests in constant time; stored PINs
+// verify with scrypt. Because every parent request carries the PIN, the digest
+// of the last successfully verified PIN is cached in memory so scrypt runs
+// once per process (or per PIN change), not once per request.
 import crypto from 'node:crypto';
 
 export const MIN_PIN_LENGTH = 6;
+export const MAX_PIN_LENGTH = 128;
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest();
 
@@ -52,12 +60,38 @@ export class RateLimiter {
 
 /** Validate a PIN chosen by the operator. Returns an error string or null. */
 export function pinProblem(pin) {
-  if (typeof pin !== 'string' || !pin) return 'CHPC_GUARDIAN_PIN is not set';
-  if (pin.length < MIN_PIN_LENGTH) return `CHPC_GUARDIAN_PIN must be at least ${MIN_PIN_LENGTH} characters`;
+  if (typeof pin !== 'string' || !pin) return 'the PIN is empty';
+  if (pin.length < MIN_PIN_LENGTH) return `the PIN must be at least ${MIN_PIN_LENGTH} characters`;
+  if (pin.length > MAX_PIN_LENGTH) return `the PIN must be at most ${MAX_PIN_LENGTH} characters`;
   if (/^(.)\1+$/.test(pin) || /^(0123456789|123456789|12345678|1234567|123456|654321|password|qwerty)/i.test(pin)) {
-    return 'CHPC_GUARDIAN_PIN is too guessable (repeated or sequential characters)';
+    return 'the PIN is too guessable (repeated or sequential characters)';
   }
   return null;
+}
+
+/* ---------- stored PIN hashes (scrypt) ---------- */
+const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 32 };
+
+/** Hash a PIN for storage: "scrypt$<salt b64>$<key b64>". */
+export function hashPin(pin) {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(String(pin), salt, SCRYPT.keylen, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p });
+  return `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+}
+
+/** Constant-time check of `pin` against a hashPin() string. */
+export function verifyPinHash(pin, stored) {
+  if (typeof stored !== 'string') return false;
+  const [algo, saltB64, keyB64] = stored.split('$');
+  if (algo !== 'scrypt' || !saltB64 || !keyB64) return false;
+  try {
+    const salt = Buffer.from(saltB64, 'base64');
+    const expected = Buffer.from(keyB64, 'base64');
+    const key = crypto.scryptSync(String(pin), salt, expected.length, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p });
+    return key.length === expected.length && crypto.timingSafeEqual(key, expected);
+  } catch {
+    return false;
+  }
 }
 
 /** Pull the supplied PIN out of a request, or null. */
@@ -74,36 +108,58 @@ export function pinFromRequest(req) {
 
 /**
  * Build the `requirePin` middleware.
- * @param {object} o  { pin: string|null, allowNoPin: boolean, limiter?: RateLimiter, log?: fn }
+ * @param {object} o
+ *   getPin      () => { source: 'env'|'db'|'none', pin?: string, hash?: string }
+ *   allowNoPin  serve parent routes without a PIN when source is 'none' (dev only)
+ *   limiter     RateLimiter for failures per client
+ *   log         warning logger
+ * The returned middleware has `.invalidate()` to drop the verified-PIN cache
+ * (call after the PIN changes) and `.verify(pin)` for direct checks.
  */
-export function makeRequirePin({ pin, allowNoPin = false, limiter = new RateLimiter(), log = console.warn } = {}) {
-  const pinHash = pin ? sha256(pin) : null;
+export function makeRequirePin({ getPin, allowNoPin = false, limiter = new RateLimiter(), log = console.warn } = {}) {
+  let okDigest = null; // sha256 of the last PIN that verified successfully
 
-  return function requirePin(req, res, next) {
-    if (!pinHash) {
+  const verify = (supplied) => {
+    if (typeof supplied !== 'string' || !supplied || supplied.length > MAX_PIN_LENGTH) return false;
+    const digest = sha256(supplied);
+    if (okDigest && crypto.timingSafeEqual(digest, okDigest)) return true;
+    const cfg = getPin();
+    let ok = false;
+    if (cfg.source === 'env') ok = crypto.timingSafeEqual(digest, sha256(cfg.pin));
+    else if (cfg.source === 'db') ok = verifyPinHash(supplied, cfg.hash);
+    if (ok) okDigest = digest;
+    return ok;
+  };
+
+  function requirePin(req, res, next) {
+    const cfg = getPin();
+    if (cfg.source === 'none') {
       if (allowNoPin) return next();
       return res.status(503).json({
-        error: 'guardian PIN is not configured on the server',
-        hint: 'set CHPC_GUARDIAN_PIN (at least 6 characters) and restart',
+        error: 'the guardian PIN has not been set up yet',
+        code: 'setup-required',
+        hint: 'open the console and enter the setup code shown in the server log',
       });
     }
     const key = req.ip || 'unknown';
     if (limiter.blocked(key)) {
       res.set('Retry-After', String(Math.ceil(limiter.windowMs / 1000)));
-      return res.status(429).json({ error: 'too many failed PIN attempts — try again later' });
+      return res.status(429).json({ error: 'too many failed PIN attempts — try again later', code: 'locked-out' });
     }
     const supplied = pinFromRequest(req);
     if (supplied == null) {
       res.set('WWW-Authenticate', 'Bearer realm="chpc"');
       return res.status(401).json({ error: 'guardian PIN required', code: 'pin-required' });
     }
-    const ok = crypto.timingSafeEqual(sha256(supplied), pinHash);
-    if (!ok) {
+    if (!verify(supplied)) {
       limiter.fail(key);
       log(`[chpc-server] bad guardian PIN from ${key}`);
       return res.status(401).json({ error: 'guardian PIN is wrong', code: 'pin-wrong' });
     }
     limiter.reset(key);
     next();
-  };
+  }
+  requirePin.invalidate = () => { okDigest = null; };
+  requirePin.verify = verify;
+  return requirePin;
 }

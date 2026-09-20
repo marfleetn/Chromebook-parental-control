@@ -5,6 +5,7 @@
 //   /api/devices/:code/*        the paired Chromebook — the pairing code IS the credential
 //   /api/auth/check, /api/settings, /api/kids/**   the parent — guardian PIN required
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -12,10 +13,10 @@ import {
   getPolicy, setPolicy,
   listDevices, deviceForCode, pairDevice, touchDevice, deleteDevice,
   getSetting, setSetting,
-  addUsage, usageRowsSince, usageTotalBetween, purgeUsageOlderThan, formatCode,
+  addUsage, usageRowsSince, usageTotalBetween, purgeUsageOlderThan, formatCode, makeCode, normalizeCode,
 } from './db.js';
 import { effectivePolicyForKid, kidStatus, dayStartMs } from './status.js';
-import { makeRequirePin, RateLimiter } from './auth.js';
+import { makeRequirePin, RateLimiter, hashPin, pinProblem } from './auth.js';
 import {
   validatePolicy, validateName, validateAgentId, validTimeZone, clampInt, LIMITS,
 } from './validate.js';
@@ -28,8 +29,11 @@ const DAY = 24 * 60 * 60 * 1000;
  * @param {object} opts
  *   dbFile          SQLite path (default ./data/chpc.db)
  *   publicDir       built console to serve at / (optional)
- *   guardianPin     the parent PIN; null/undefined = not configured
- *   allowNoPin      serve parent routes without a PIN (loopback dev only)
+ *   guardianPin     PIN fixed by the environment (CHPC_GUARDIAN_PIN); null = use the
+ *                   hash stored in the database, or first-run setup if there is none
+ *   allowNoPin      serve parent routes without a PIN while none is set (loopback dev only)
+ *   setupCode       override the generated one-time setup code (tests)
+ *   setupCodeFile   path to write the setup code to (0600) while setup is pending
  *   corsOrigins     array of origins allowed to call the API cross-origin (default none)
  *   trustProxy      express 'trust proxy' setting (default false)
  *   retentionDays   purge usage older than this at startup / on purge() (0 = keep forever)
@@ -77,12 +81,33 @@ export function createApp(opts = {}) {
   });
   app.use(express.json({ limit: '256kb' }));
 
+  // ---- guardian PIN source ---------------------------------------------------
+  const envPin = opts.guardianPin || null;
+  const getPin = () => {
+    if (envPin) return { source: 'env', pin: envPin };
+    const hash = getSetting(db, 'pinHash', null);
+    if (typeof hash === 'string' && hash) return { source: 'db', hash };
+    return { source: 'none' };
+  };
   const requirePin = makeRequirePin({
-    pin: opts.guardianPin || null,
+    getPin,
     allowNoPin: !!opts.allowNoPin,
     limiter: new RateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 }),
     log,
   });
+  // First-run setup: while no PIN exists, a one-time code (printed by index.js,
+  // optionally written to a 0600 file) authorises choosing one from the console.
+  let setupCode = null;
+  const setupLimiter = new RateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+  const needsSetup = () => getPin().source === 'none' && !opts.allowNoPin;
+  const writeSetupFile = () => {
+    if (!opts.setupCodeFile) return;
+    try {
+      if (setupCode) fs.writeFileSync(opts.setupCodeFile, setupCode + '\n', { mode: 0o600 });
+      else if (fs.existsSync(opts.setupCodeFile)) fs.unlinkSync(opts.setupCodeFile);
+    } catch (e) { log('[chpc-server] could not update setup code file', e && e.message); }
+  };
+  if (needsSetup()) { setupCode = normalizeCode(opts.setupCode) || makeCode(); writeSetupFile(); }
   // Unknown pairing codes are rate-limited per client so codes can't be enumerated.
   const codeLimiter = new RateLimiter({ limit: 20, windowMs: 15 * 60 * 1000 });
 
@@ -119,6 +144,33 @@ export function createApp(opts = {}) {
 
   // ---- public --------------------------------------------------------------
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'chpc-server' }));
+
+  // ---- first-run setup (public; guarded by the one-time setup code) ---------
+  app.get('/api/setup/status', (req, res) =>
+    res.json({ needsSetup: needsSetup(), pinSource: getPin().source }));
+  app.post('/api/setup', (req, res) => {
+    if (!needsSetup()) return err(res, 409, 'the guardian PIN is already set', { code: 'already-set-up' });
+    const key = req.ip || 'unknown';
+    if (setupLimiter.blocked(key)) {
+      res.set('Retry-After', '900');
+      return err(res, 429, 'too many setup attempts — try again later', { code: 'locked-out' });
+    }
+    const body = req.body || {};
+    const supplied = normalizeCode(body.setupCode);
+    if (!supplied || !setupCode || supplied.length !== setupCode.length ||
+        !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(setupCode))) {
+      setupLimiter.fail(key);
+      return err(res, 401, 'setup code is wrong — it is printed in the server log', { code: 'setup-code-wrong', field: 'setupCode' });
+    }
+    const problem = pinProblem(body.pin);
+    if (problem) return err(res, 400, problem, { field: 'pin' });
+    setSetting(db, 'pinHash', hashPin(body.pin));
+    setupCode = null;
+    writeSetupFile();
+    requirePin.invalidate();
+    log('[chpc-server] guardian PIN set up from ' + key);
+    res.status(201).json({ ok: true, pinSource: 'db' });
+  });
 
   // ---- device routes (pairing-code auth) -----------------------------------
   app.get('/api/devices/:code', codeGuard, (req, res) => {
@@ -183,16 +235,27 @@ export function createApp(opts = {}) {
   // ---- parent routes (guardian PIN) ----------------------------------------
   app.use(['/api/auth', '/api/settings', '/api/kids'], requirePin);
 
-  app.get('/api/auth/check', (req, res) => res.json({ ok: true }));
+  app.get('/api/auth/check', (req, res) => res.json({ ok: true, pinSource: getPin().source }));
+  app.put('/api/auth/pin', (req, res) => {
+    if (getPin().source === 'env') {
+      return err(res, 409, 'the PIN is fixed by CHPC_GUARDIAN_PIN on the server; change it there', { code: 'pin-managed-by-env' });
+    }
+    const problem = pinProblem(req.body?.pin);
+    if (problem) return err(res, 400, problem, { field: 'pin' });
+    setSetting(db, 'pinHash', hashPin(req.body.pin));
+    requirePin.invalidate();
+    log('[chpc-server] guardian PIN changed from ' + (req.ip || 'unknown'));
+    res.json({ ok: true, pinSource: 'db' });
+  });
 
-  app.get('/api/settings', (req, res) => res.json({ timezone: tzOf(), retentionDays }));
+  app.get('/api/settings', (req, res) => res.json({ timezone: tzOf(), retentionDays, pinSource: getPin().source }));
   app.put('/api/settings', (req, res) => {
     const tz = req.body && req.body.timezone;
     if (tz !== undefined) {
       if (!validTimeZone(tz)) return err(res, 400, 'timezone is not a valid IANA time zone', { field: 'timezone' });
       setSetting(db, 'tz', tz);
     }
-    res.json({ timezone: tzOf(), retentionDays });
+    res.json({ timezone: tzOf(), retentionDays, pinSource: getPin().source });
   });
 
   app.get('/api/kids', (req, res) => {
@@ -345,7 +408,7 @@ export function createApp(opts = {}) {
   const purge = () => (retentionDays > 0 ? purgeUsageOlderThan(db, retentionDays) : 0);
   purge();
 
-  return { app, db, purge };
+  return { app, db, purge, getSetupCode: () => setupCode, needsSetup };
 }
 
 // ---------- helpers ----------

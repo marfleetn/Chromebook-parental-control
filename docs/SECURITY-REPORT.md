@@ -145,7 +145,21 @@ practices now hold and are worth keeping:
 4. Optional: TLS in-process (or a documented Caddy recipe) for households that
    want the console reachable from a phone away from home.
 
-## 9. How to re-verify
+## 9. Addendum — easier deployment path (same day)
+
+Added after the review to lower the bar for non-technical parents without
+weakening the model above:
+
+| Change | Security notes |
+| ------ | -------------- |
+| **First-run PIN setup in the console.** No PIN configured → server mints a one-time 8-letter code (CSPRNG), prints it and writes it `0600` next to the database; `POST /api/setup` exchanges code + chosen PIN for a stored **scrypt** hash, then retires the code and deletes the file. | Parent routes answer `503 setup-required` to everyone until then, so an unset console cannot be claimed from the LAN. Setup attempts are rate-limited (10 / 15 min / IP); weak PINs are refused; the code is single use and regenerated on each restart while unset. PIN change from Settings requires the current PIN. `CHPC_GUARDIAN_PIN` still works and, when set, disables in-console changes. The implicit "no PIN on loopback" dev mode became an explicit `CHPC_ALLOW_NO_PIN`, refused on non-loopback hosts. |
+| **`install.sh` one-liner** (apt + systemd). | Runs as root by necessity; installs only from the pinned GitHub tarball (`CHPC_REF`), creates an unprivileged `chpc` user, `0700` data dir, `0600` env file, and a hardened unit (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `ReadWritePaths` limited to the data dir). Re-runs are in-place upgrades. Parents should read the script before piping it to `sudo bash`, as with any installer. |
+| **Prebuilt image** on GHCR via `publish.yml` (multi-arch), compose without secrets. | Built by GitHub Actions from the repository; pin a version tag (`:1.0.0`) rather than `:latest` if you want reproducibility. Container remains non-root, read-only, capabilities dropped. |
+| `chpc` helper / `cli.js reset-pin`. | Requires root on the server; resetting the PIN only removes the hash, and a new setup code is needed to choose another — no back door. |
+
+Tests: 66 unit/integration (was 61); console e2e now exercises the setup screen end to end.
+
+## 10. How to re-verify
 
 ```bash
 npm ci

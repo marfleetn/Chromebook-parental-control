@@ -34,43 +34,60 @@ reachable unless the internet switch is off.
 
 ## Setup — one time
 
-**On the machine that will host the server** (a laptop that is usually on, a
-Raspberry Pi, a NAS with Docker, or the Chromebook itself in Linux mode).
+**On the machine that will host the server** (a Raspberry Pi, a laptop that is
+usually on, a NAS with Docker, or the Chromebook itself in Linux mode). Pick
+whichever of these you find easier.
 
-### Option A — Docker (recommended if you have it)
+### Option A — one line (Raspberry Pi, Ubuntu/Debian, Chromebook Linux)
+
+Open a terminal and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marfleetn/Chromebook-parental-control/main/install.sh | sudo bash
+```
+
+Wait a minute or two. At the end it prints:
+
+- the **console address** (something like `http://192.168.1.23:4100`) and a QR
+  code you can scan with your phone;
+- a one-time **setup code** like `KTRM-XPBD`.
+
+CHPC now starts by itself whenever the machine boots. Handy commands later:
+`sudo chpc status`, `sudo chpc logs`, `sudo chpc update`, `sudo chpc reset-pin`.
+
+### Option B — Docker (NAS, home server)
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/marfleetn/Chromebook-parental-control/main/docker-compose.yml
+docker compose up -d
+docker compose logs chpc
+```
+
+The log shows the **setup code**. The console is at `http://<that machine>:4100`.
+(Many NAS apps, such as Portainer or Container Manager, let you paste the
+compose file into a form instead of typing commands.)
+
+### Option C — Node by hand
 
 ```bash
 git clone <your-repo-url> chpc && cd chpc
-cp .env.example .env
-# edit .env: set CHPC_GUARDIAN_PIN to a PIN only parents know (6+ characters)
-docker compose up -d --build
+npm install && npm run build
+HOST=0.0.0.0 CHPC_PUBLIC_DIR=web/dist npm start
 ```
 
-### Option B — Node directly
+The terminal prints the setup code.
 
-1. Install Node 22. On a Chromebook in Linux mode:
-   ```bash
-   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-   sudo apt-get install -y nodejs
-   ```
-2. Get the code and build it once:
-   ```bash
-   git clone <your-repo-url> chpc && cd chpc
-   npm install
-   npm run build
-   ```
-3. Start it (put this in a script or a system service so it comes back after a reboot):
-   ```bash
-   HOST=0.0.0.0 CHPC_GUARDIAN_PIN='your-pin-here' CHPC_PUBLIC_DIR=web/dist npm start
-   ```
+### Then: choose your PIN
 
-Either way the console is at **http://SERVER-IP:4100** from any device on
-your Wi-Fi (find the IP with `hostname -I` on Linux). The server refuses to
-start on the network without a PIN, so you cannot forget this step.
+Open the console address in a browser. The first screen asks for the **setup
+code** and a **PIN** of your choosing (6+ characters; `123456` and the like are
+refused). The code works once; after that the PIN is the only key.
 
-> **Choosing a PIN.** At least 6 characters; `123456`, `111111` and the like are
-> rejected. Anyone with the PIN can change every rule — it is the key to the
-> whole system.
+> **Choosing a PIN.** Anyone with the PIN can change every rule — it is the key to
+> the whole system. You can change it later in **Settings**. Lost it? On the
+> server run `sudo chpc reset-pin` (or `docker compose exec chpc node
+> server/src/cli.js reset-pin` then `docker compose restart`) to get a fresh
+> setup code.
 
 ## Unlocking the console
 
@@ -143,7 +160,9 @@ the console is reachable, so the child cannot quietly opt out that way.
 | Rename a child | Click the name at the top of their page. |
 | Remove a child | Dashboard → × next to the name. Their rules, devices and usage are deleted. |
 | Change the time zone the rules run in | **Settings** (top right). |
-| Move the PIN | Change `CHPC_GUARDIAN_PIN` on the server and restart; every browser and every Chromebook popup will ask for the new one. |
+| Change the PIN | **Settings** → Guardian PIN. Every browser and every Chromebook popup will ask for the new one. |
+| Forgot the PIN | On the server: `sudo chpc reset-pin` (Docker: see Setup). It prints a new setup code. |
+| Update CHPC | `sudo chpc update` (Docker: `docker compose pull && docker compose up -d`). Rules and data are kept. |
 
 ## What the lock page says
 
@@ -164,7 +183,8 @@ When a page is blocked the child sees a lock page naming the site and one of:
 | Symptom | First thing to check |
 | ------- | -------------------- |
 | Console shows *server offline* | Is the server running? Same Wi-Fi? Right IP and port 4100? |
-| "Guardian PIN is not configured" | The server was started without `CHPC_GUARDIAN_PIN`. Set it and restart. |
+| Console shows "set up your PIN" again | The PIN was reset, or the database was moved. Use the setup code from `sudo chpc status` / the server log. |
+| Lost the setup code | `sudo chpc status` shows it while setup is pending; or restart the server for a fresh one. |
 | Popup says the code is not recognised | Codes are letters only, no digits — retype it, or revoke and generate a new one. Check the console address (include `http://`). |
 | Child can browse but no limits apply | Devices tab: is *last seen* recent? If not, the extension is off, unpaired or cannot reach the server. Reload it from `chrome://extensions`. |
 | Usage stays at 0 | Minutes are only counted while the child is active in a focused Chrome window. If it stays at 0 while they browse, see the previous row. |
@@ -177,8 +197,9 @@ When a page is blocked the child sees a lock page naming the site and one of:
 ## Privacy
 
 - Rules, children, devices and usage live in **one SQLite file** on your
-  machine (`data/chpc.db`, or the `/data` volume in Docker). Back it up if you
+  machine (`/var/lib/chpc/chpc.db` with the installer, the `/data` volume in Docker). Back it up if you
   care about the rules; deleting it is a full reset.
+- Your PIN is stored only as a salted hash; nobody can read it back.
 - Only the **site name** (hostname) of what the child visits is recorded —
   never full page addresses, searches or page content.
 - Usage older than **90 days** is deleted automatically
@@ -190,8 +211,8 @@ When a page is blocked the child sees a lock page naming the site and one of:
 
 | Path | What it is |
 | ---- | ---------- |
-| `data/chpc.db` | Your data (bare-Node install). Docker: the `chpc-data` volume. |
-| `.env` | Your PIN and settings (Docker). Keep it private. |
+| `/var/lib/chpc/chpc.db` | Your data (one-line installer). Docker: the `chpc-data` volume. By hand: `data/chpc.db`. |
+| `/etc/chpc/chpc.env` | Service settings (one-line installer). |
 | `extension/` | The folder to load on each Chromebook. |
 | `docs/SECURITY-REPORT.md` | What was reviewed, what was fixed, what remains. |
 | `docs/HLD.md`, `docs/LLD.md` | Design documents, if a developer helps you. |

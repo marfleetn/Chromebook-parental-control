@@ -4,7 +4,7 @@
 # Express API and serves the console. Runs as a non-root user.
 #
 #   docker build -t chpc .
-#   docker run -p 4100:4100 -e CHPC_GUARDIAN_PIN=… -v chpc-data:/data chpc
+#   docker run -p 4100:4100 -v chpc-data:/data chpc     (setup code appears in the log)
 
 FROM node:22-alpine AS build
 WORKDIR /app
@@ -53,5 +53,6 @@ VOLUME ["/data"]
 EXPOSE 4100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||4100)+'/api/health').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
-# CHPC_GUARDIAN_PIN must be supplied at run time; the server exits otherwise.
+# First run prints a one-time setup code in the container log; choose the PIN in
+# the console. Or fix it with CHPC_GUARDIAN_PIN at run time.
 CMD ["node", "server/src/index.js"]

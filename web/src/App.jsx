@@ -4,6 +4,7 @@ import KidList from "./components/KidList.jsx";
 import KidDetail from "./components/KidDetail.jsx";
 import SettingsDrawer from "./components/SettingsDrawer.jsx";
 import PinGate from "./components/PinGate.jsx";
+import SetupScreen from "./components/SetupScreen.jsx";
 
 // Tiny hash router: #/ => dashboard, #/kid/:id => detail.
 function useRoute() {
@@ -30,6 +31,7 @@ export default function App() {
   const [err, setErr] = useState(null);
   // null = unknown yet, true = PIN accepted (or not required), false = need PIN
   const [unlocked, setUnlocked] = useState(null);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [gateMsg, setGateMsg] = useState(null);
 
   // Any 401 anywhere in the app drops us back to the gate.
@@ -41,9 +43,10 @@ export default function App() {
   const refresh = useCallback(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
     api.getSettings()
-      .then((s) => { setSettings(s); setErr(null); setUnlocked(true); })
+      .then((s) => { setSettings(s); setErr(null); setUnlocked(true); setNeedsSetup(false); })
       .catch((e) => {
         if (e.status === 401) return; // gate handles it
+        if (e.status === 503 && e.code === "setup-required") { setNeedsSetup(true); setUnlocked(false); return; }
         if (e.status === 503) { setUnlocked(false); setGateMsg(e.message); return; }
         setErr(e.message);
       });
@@ -64,12 +67,28 @@ export default function App() {
     refresh();
   };
   const lock = () => { pinStore.clear(); setUnlocked(false); setGateMsg(null); go("/"); };
+  const finishSetup = async (pin) => {
+    pinStore.set(pin, false);
+    setNeedsSetup(false);
+    setUnlocked(true);
+    refresh();
+  };
+  const changePin = async (pin) => {
+    await api.changePin(pin);
+    let remembered = false;
+    try { remembered = !!localStorage.getItem("chpc.pin"); } catch { /* storage blocked */ }
+    pinStore.set(pin, remembered);
+    refresh();
+  };
 
   const saveTz = async (timezone) => {
     const s = await api.setSettings(timezone);
     setSettings(s);
   };
 
+  if (needsSetup) {
+    return <SetupScreen onDone={finishSetup} health={health} />;
+  }
   if (unlocked === false) {
     return <PinGate onUnlock={unlock} message={gateMsg} health={health} />;
   }
@@ -110,6 +129,8 @@ export default function App() {
         <SettingsDrawer
           timezone={settings.timezone}
           retentionDays={settings.retentionDays}
+          pinSource={settings.pinSource}
+          onChangePin={changePin}
           onSave={saveTz}
           onClose={() => setShowSettings(false)}
         />

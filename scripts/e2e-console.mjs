@@ -23,12 +23,19 @@ const check = (cond, msg) => { if (!cond) throw new Error('E2E FAIL: ' + msg); c
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chpc-e2e-web-'));
 const port = 4700 + Math.floor(Math.random() * 300);
 const base = `http://127.0.0.1:${port}`;
+// No PIN in the environment: the server must print a setup code and the console must offer first-run setup.
 const server = spawn(process.execPath, ['server/src/index.js'], {
   cwd: root,
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', CHPC_GUARDIAN_PIN: PIN, CHPC_DB: path.join(dataDir, 'chpc.db'), CHPC_PUBLIC_DIR: path.join(root, 'web/dist') },
+  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', CHPC_GUARDIAN_PIN: '', CHPC_ALLOW_NO_PIN: '', CHPC_DB: path.join(dataDir, 'chpc.db'), CHPC_PUBLIC_DIR: path.join(root, 'web/dist') },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
+let stdout = '';
+server.stdout.on('data', (d) => { stdout += d; });
 for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/api/health')).ok) break; } catch {} await sleep(100); }
+await sleep(300);
+const setupCode = (/Setup code:\s+([A-Z]{4}-[A-Z]{4})/.exec(stdout) || [])[1];
+check(!!setupCode, 'server printed a one-time setup code: ' + setupCode);
+check(fs.readFileSync(path.join(dataDir, 'setup-code.txt'), 'utf8').trim() === setupCode.replace('-', ''), 'setup code also written next to the database');
 
 const browser = await playwright.chromium.launch({ headless: true });
 let exitCode = 0;
@@ -36,12 +43,28 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  // 401s from the PIN gate (pre-unlock settings fetch, deliberate wrong PIN) are expected.
-  page.on('console', (m) => { if (m.type() === 'error' && !/status of 401/.test(m.text())) errors.push(m.text()); });
+  // 401s (PIN gate, deliberate wrong PIN) and 503s (setup-required probe) are expected responses.
+  page.on('console', (m) => { if (m.type() === 'error' && !/status of (401|503)/.test(m.text())) errors.push(m.text()); });
 
   await page.goto(base + '/');
+  await page.waitForSelector('#setup-code');
+  check(true, 'first-run setup screen shown when no PIN exists');
+  await page.fill('#setup-code', 'zzzz-zzzz');
+  await page.fill('#new-pin', PIN);
+  await page.fill('#new-pin2', PIN);
+  await page.click('button[type=submit]');
+  await page.waitForSelector('.banner.error');
+  check(/setup code is not right/.test(await page.textContent('.banner.error')), 'wrong setup code is rejected');
+  await page.fill('#setup-code', setupCode.toLowerCase());
+  await page.click('button[type=submit]');
+  await page.waitForSelector('text=The kids');
+  check(true, 'correct setup code + new PIN opens the console');
+  check(!fs.existsSync(path.join(dataDir, 'setup-code.txt')), 'setup code file removed once the PIN is set');
+  const st = await fetch(base + '/api/setup/status').then((r) => r.json());
+  check(st.needsSetup === false && st.pinSource === 'db', 'server reports setup complete');
+  await page.click('.topbar button:has-text("Lock")');
   await page.waitForSelector('#pin');
-  check(true, 'PIN gate shown before anything else');
+  check(true, 'PIN gate shown after locking');
   await page.fill('#pin', 'wrong-pin');
   await page.click('button[type=submit]');
   await page.waitForSelector('.banner.error');
