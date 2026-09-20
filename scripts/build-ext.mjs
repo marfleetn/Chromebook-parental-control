@@ -5,8 +5,8 @@
  *
  *   node scripts/build-ext.mjs
  */
-import { build, context } from 'esbuild';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { build } from 'esbuild';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const root = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -35,8 +35,22 @@ const files = new Set([
   manifest.background?.service_worker,
   manifest.action?.default_popup,
   ...(manifest.action?.default_popup ? [manifest.action.default_popup.replace(/\.html?$/, '.js')] : []),
+  ...(manifest.web_accessible_resources || []).flatMap((w) => w.resources || []),
+  'pages/blocked.js',
   'vendor/core.js',
 ]);
+if (manifest.background?.type !== 'module') {
+  console.error('manifest.background.type must be "module": background.js uses static imports');
+  process.exit(1);
+}
+// MV3 forbids inline scripts in extension pages — catch them at build time.
+for (const html of ['popup.html', 'pages/blocked.html']) {
+  const src = readFileSync(path.join(ext, html), 'utf8');
+  if (/<script(?![^>]*\ssrc=)[^>]*>[^<]*\S[^<]*<\/script>/i.test(src)) {
+    console.error(`${html} contains an inline <script>; MV3 CSP blocks it`);
+    process.exit(1);
+  }
+}
 for (const f of files) {
   if (!f) continue;
   if (!existsSync(path.join(ext, f))) {

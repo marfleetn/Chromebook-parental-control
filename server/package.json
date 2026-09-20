@@ -15,11 +15,12 @@
     "./db": "./src/db.js",
     "./status": "./src/status.js",
     "./store": "./src/store.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./auth": "./src/auth.js",
+    "./validate": "./src/validate.js"
   },
   "dependencies": {
     "@chpc/core": "*",
-    "cors": "^2.8.5",
     "express": "^4.21.2"
   },
   "license": "MIT",

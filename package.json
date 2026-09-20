@@ -13,18 +13,19 @@
   },
   "scripts": {
     "test": "node --test core/test/*.mjs core/test/*.js server/test/*.js",
-    "build": "npm run build:web",
+    "build": "npm run build:web && npm run build:ext",
     "build:web": "npm run build --workspace web",
     "build:ext": "node scripts/build-ext.mjs",
     "start": "npm start --workspace server",
     "dev": "npm run dev --workspace server",
-    "dev:web": "npm run dev --workspace web"
+    "dev:web": "npm run dev --workspace web",
+    "check": "node --check server/src/*.js core/src/*.js extension/*.js extension/pages/*.js scripts/*.mjs",
+    "audit:prod": "npm audit --omit=dev",
+    "e2e:ext": "node scripts/e2e-extension.mjs",
+    "e2e:web": "node scripts/e2e-console.mjs"
   },
   "license": "MIT",
-  "dependencies": {
-    "express": "^5.2.1"
-  },
   "devDependencies": {
-    "esbuild": "^0.21.5"
+    "esbuild": "^0.25.12"
   }
 }

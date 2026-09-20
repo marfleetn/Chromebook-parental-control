@@ -1,7 +1,7 @@
-# CHPC — run locally:
-#   docker compose up --build
-# Console:  http://localhost:4100
-# API:      http://localhost:4100/api
+# CHPC — run at home:
+#   cp .env.example .env   # set CHPC_GUARDIAN_PIN
+#   docker compose up -d --build
+# Console + API: http://<host>:4100
 services:
   chpc:
     build: .
@@ -10,11 +10,21 @@ services:
     ports:
       - "4100:4100"
     environment:
-      CHPC_TZ: ${CHPC_TZ:-Europe/London}
-      # CHPC_GUARDIAN_PIN: ...   # future — see LLD §8
+      # Compose aborts with a clear message if the PIN is missing from .env.
+      CHPC_GUARDIAN_PIN: ${CHPC_GUARDIAN_PIN:?set CHPC_GUARDIAN_PIN in .env (6+ characters)}
+      CHPC_RETENTION_DAYS: ${CHPC_RETENTION_DAYS:-90}
+      CHPC_TRUST_PROXY: ${CHPC_TRUST_PROXY:-0}
+      CHPC_CORS_ORIGINS: ${CHPC_CORS_ORIGINS:-}
     volumes:
       - chpc-data:/data
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   chpc-data:

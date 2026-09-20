@@ -5,154 +5,193 @@ this is the only document you need.*
 
 ## What you get
 
-- A **console** you open in your own browser: add each child, set their
-  internet rules, watch what they are actually using.
+- A **console** you open in your own browser, protected by a PIN only you
+  know: add each child, set their internet rules, see what they actually use.
 - An **enforcing Chrome extension** for each child's Chromebook that blocks
-  disallowed browsing in real time and shows a friendly lock page.
-- **Usage metering**: the child's device reports how many minutes it spent on
-  each site, so your daily and per-site limits are based on real usage.
-- **No cloud**: everything lives on your own machine. If your WiFi is down
-  but the server is on, rules keep working; if the server is off, the
-  extension keeps enforcing the last policy it knew about.
+  disallowed browsing before the page loads and shows a friendly lock page
+  that says *why*.
+- **Usage metering**: the Chromebook counts a minute for every minute a site is
+  open in the focused window while the child is active, so daily and per-site
+  limits are based on real use.
+- **No cloud**: everything lives on your own machine. If the server is off, the
+  Chromebook keeps enforcing the last rules it knew about.
 
 ## What you can control
 
-| Control              | What it does                                                                 |
-| -------------------- | ---------------------------------------------------------------------------- |
-| Time windows         | Internet only between, say, 5.00 pm and 9.00 pm on weekdays. Can wrap midnight. |
-| Off days             | Days with no web access at all — e.g. school days, or specific exam dates.   |
-| Daily budget         | A total minutes-per-day cap across every site (0 = unlimited).               |
-| Per-site budgets     | A minutes cap for one site only — e.g. 20 min on YouTube, everything else as normal. |
-| Blocked sites        | Sites that are never allowed — e.g. shopping sites. Wildcards allowed.        |
-| Allowed sites        | Sites that are always allowed even if their parent domain is blocked.        |
+| Control | What it does |
+| ------- | ------------ |
+| Internet on/off | One switch that blocks every website for that child. |
+| Mode | *Everything allowed except blocked sites*, or *Approved sites only*. |
+| Allowed hours | Internet only between, say, 08:00 and 20:00, on the days you tick. A window can cross midnight. |
+| Off days | Whole days with no web access: weekdays (e.g. every Sunday) or one-off dates (exams, holidays). |
+| Daily limit | A total minutes-per-day cap across every site. Blank = no limit. |
+| Per-site limits | A minutes cap for one site — e.g. 30 minutes of YouTube, everything else as normal. |
+| Blocked sites | Never allowed, whatever else is set. `youtube.com` also covers `m.youtube.com`, `www.youtube.com`, etc. |
+| Approved sites | In *Approved sites only* mode, the only sites that open. |
+
+Home-network addresses (your router, printer, this console) always stay
+reachable unless the internet switch is off.
 
 ## Setup — one time
 
-**On the machine that will host the server** (your laptop, or the Chromebook
-itself in Linux dev mode):
+**On the machine that will host the server** (a laptop that is usually on, a
+Raspberry Pi, a NAS with Docker, or the Chromebook itself in Linux mode).
 
-1. Get Node 22. On a Chromebook in Linux dev mode:
+### Option A — Docker (recommended if you have it)
+
+```bash
+git clone <your-repo-url> chpc && cd chpc
+cp .env.example .env
+# edit .env: set CHPC_GUARDIAN_PIN to a PIN only parents know (6+ characters)
+docker compose up -d --build
+```
+
+### Option B — Node directly
+
+1. Install Node 22. On a Chromebook in Linux mode:
    ```bash
    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
    sudo apt-get install -y nodejs
    ```
-   On a Linux laptop: `nvm install 22 && nvm use 22` or the distro package.
-
-2. Get the code (from your laptop, or clone the private repo directly):
+2. Get the code and build it once:
    ```bash
-   # Option A — copy the folder over
-   scp -r <you>@<laptop>:/path/to/chpc ~/chpc
-   # Option B — clone (needs your GitHub access)
-   git clone <your-repo-url> chpc
-   ```
-
-3. Build once:
-   ```bash
-   cd chpc
+   git clone <your-repo-url> chpc && cd chpc
    npm install
-   npm run build:web
+   npm run build
    ```
-
-4. Start it:
+3. Start it (put this in a script or a system service so it comes back after a reboot):
    ```bash
-   npm start
+   HOST=0.0.0.0 CHPC_GUARDIAN_PIN='your-pin-here' CHPC_PUBLIC_DIR=web/dist npm start
    ```
-   → Console is on **http://localhost:4100** (or `http://SERVER-IP:4100`
-   from other devices on the same WiFi).
 
-> **Tip** — keep it running in a terminal with `tmux`, or set up a
-> system service / autostart if you want it to come up on its own.
+Either way the console is at **http://SERVER-IP:4100** from any device on
+your Wi-Fi (find the IP with `hostname -I` on Linux). The server refuses to
+start on the network without a PIN, so you cannot forget this step.
+
+> **Choosing a PIN.** At least 6 characters; `123456`, `111111` and the like are
+> rejected. Anyone with the PIN can change every rule — it is the key to the
+> whole system.
+
+## Unlocking the console
+
+Open the console address. Enter the PIN. Tick **Remember on this device** only
+on your own phone or laptop, never on a shared or child device. The **Lock**
+button in the top bar forgets the PIN again. After ten wrong attempts from one
+device the console locks that device out for 15 minutes.
 
 ## Adding a child and their rules
 
-1. Open the console, click **+ Add child**, type their name.
-2. Pick their name on the left — the tabs **Policy · Devices · Usage** appear.
-3. **Policy tab** — set:
-   - A *weekday* time window (e.g. 17.00–21.00) and a *weekend* window
-     (e.g. 09.00–22.00).
-   - *Off days* (e.g. Mon–Fri if you want weekends only, or specific ISO
-     dates like exams).
-   - A **daily limit** in minutes, or leave at 0 for unlimited.
-   - **Blocked sites**, one per line or space-separated — e.g.
-     `amazon.co.uk`, `facebook.com`, `*.bad-shop.example.net`.
-   - **Site limits** — a minutes cap for a specific site, e.g. `youtube.com`
-     → 20.
-   - **Allowed sites** — e.g. `wikipedia.org`, `bbc.co.uk` — these always work
-     even outside the window or on an off day.
-   - **Save**.
-4. **Devices tab** — click **Generate pairing code**. You see a
-   6-character code like `K7F2QX`. That code is what the child's Chromebook
-   needs — keep it somewhere safe; anyone with the code can use that
-   pairing. Revoke it from the same tab if needed.
+1. Type the child's name in **New child name…** and click **Add child**.
+2. You land on their page with three tabs: **Policy · Devices · Usage**.
+3. On **Policy**:
+   - leave **Internet is allowed** on (turn it off for an instant "everything off");
+   - pick the **Mode**;
+   - set a **Daily minutes limit** if you want one;
+   - tick **Off days** and/or add one-off dates;
+   - tick **Restrict internet to these hours** and set the times and days;
+   - add **Blocked sites** and **Per-site time limits** (type the site, press Enter or Add);
+   - click **Save policy**. A yellow *unsaved changes* pill reminds you if you
+     forget.
+4. Changes reach the child's Chromebook within a minute.
 
 ## Pairing the child's Chromebook (one time per device)
 
-1. On the Chromebook: `chrome://extensions` → switch **Developer mode** on
-   (top-right toggle).
-2. Click **Load unpacked** and pick the `extension/` folder (either:
-   - copy it over with the same `scp` you used for the rest, or
-   - point the file browser at the network share).
-3. The extension appears. Click its icon → **Settings** (or the setup page
-   it opens on first run) → enter the **server address** (`SERVER-IP:4100`)
-   and the **pairing code**.
-4. The device locks in. From this point on, every web navigation is checked
-   against that child's rules.
+1. In the console, open the child → **Devices** → give the device a name →
+   **Generate code**. You get an 8-letter code like `KTRM-XPBD` and the console
+   address to type in. The code is that Chromebook's key: whoever has it can
+   read the child's rules and report usage as that device. Revoke it from the
+   same tab if it leaks.
+2. On the Chromebook, signed in as the child:
+   - copy the `extension/` folder from this repo onto the Chromebook (Files app,
+     a USB stick, or download the repo zip);
+   - open `chrome://extensions`, switch **Developer mode** on (top right),
+     click **Load unpacked**, pick the `extension` folder;
+   - pin the *CHPC Family* icon (puzzle-piece menu → pin) and click it;
+   - enter the **console address** (`http://SERVER-IP:4100`) and the **pairing
+     code**, click **Pair & connect**. The popup should say *Paired* and show
+     the child's name.
+3. Back in the console, the Devices tab shows *last seen just now* within a
+   minute. Type a site into **Test a decision** to see what the Chromebook will
+   do with it right now.
+
+### Important: what the extension cannot stop
+
+The extension is installed in Developer mode. A child who can open
+`chrome://extensions` can switch it off or remove it. To close that door:
+
+- use a **Family Link supervised account** for the child on the Chromebook
+  (it restricts extensions and Developer mode), or a school/enterprise-managed
+  device that force-installs the extension;
+- do **not** give the child the owner account of the Chromebook;
+- check the **Devices** tab now and then: *last seen* going stale means the
+  extension has stopped talking to the console.
+
+Unpairing from inside the popup requires the guardian PIN, and only works while
+the console is reachable, so the child cannot quietly opt out that way.
 
 ## Day to day
 
-| Want to…                          | Do this                                                              |
-| --------------------------------- | --------------------------------------------------------------------- |
-| Check what a child used today     | Console → child → **Usage** tab → "today" summary + per-site list.    |
-| See last week                     | Same tab → **History**.                                                |
-| Pause a child for the day         | Set their daily limit to 1 (or 0 if you'd prefer unlimited), save.     |
-| Extend hours for one evening      | Widen the weekday window on the Policy tab, save.                       |
-| Give a one-off site allowance     | Add it to **Allowed sites**, save.                                     |
-| Unpair a device                   | Devices tab → **Revoke** next to the code.                              |
-| Remove a child entirely           | Right-click (or the ⋯ menu) on their name → Delete. Confirmed; all their usage and pairings are removed with them. |
-| Change the timezone the rules run in | Settings drawer (⚙ icon, top-right of the console).                 |
+| Want to… | Do this |
+| -------- | ------- |
+| See what a child used today | Child → **Usage**: minutes used, top sites, 7-day bars. |
+| Switch the internet off right now | Child → **Policy** → untick **Internet is allowed** → Save. |
+| Give one extra hour tonight | Widen the **Allowed hours** or raise the **Daily minutes limit**, Save. Undo tomorrow. |
+| Block a site for good | **Blocked sites** → type it → Add → Save. |
+| Let only school sites work | Mode → **Approved sites only**, add the sites, Save. |
+| Check what the Chromebook would do with a site | **Devices** → **Test a decision**. |
+| Unpair a Chromebook | **Devices** → **Unpair** next to it. It stops being managed within a minute. |
+| Rename a child | Click the name at the top of their page. |
+| Remove a child | Dashboard → × next to the name. Their rules, devices and usage are deleted. |
+| Change the time zone the rules run in | **Settings** (top right). |
+| Move the PIN | Change `CHPC_GUARDIAN_PIN` on the server and restart; every browser and every Chromebook popup will ask for the new one. |
 
 ## What the lock page says
 
-When the extension blocks a navigation, the child sees a simple lock page
-that names **why** — one of:
+When a page is blocked the child sees a lock page naming the site and one of:
 
-- *It's outside your internet hours.*
-- *Today is an off day for online use.*
-- *You've used up your daily internet time.*
-- *You've reached the limit for this site today.*
-- *This site is not allowed.*
-- *This site is on the always-allowed list — allowing.* (and it loads)
-
-If the child is confused about a block, they can read that line on the lock
-page — no "why was I blocked" guessing.
+- *Internet is switched off*
+- *Today is an off day*
+- *Outside allowed hours*
+- *Daily time is used up*
+- *This site is blocked*
+- *Time limit for this site reached*
+- *Site not on the approved list*
+- *Console unreachable* (the Chromebook has never received rules and cannot
+  reach the console — everything except the home network is locked until it can)
 
 ## Troubleshooting
 
-| Symptom                                                        | First thing to check                                            |
-| ------------------------------------------------------------- | --------------------------------------------------------------- |
-| Console says "server unreachable"                              | Is `npm start` still running? Is the browser on the machine that is hosting it, on the same network? |
-| Extension says "code not recognised"                            | Did you copy the code exactly? Revoke + regenerate from the Devices tab. |
-| Child can browse but no limits are applied                      | Open the Console → child's **Usage** tab — if totals are 0, the extension's heartbeat/usage is not landing. Check the pairing. |
-| A site you wanted to block still works                          | Wildcards need to match the *hostname* — check spelling. Also confirm the **Allowed sites** list doesn't contain the parent domain. |
-| Rules changed but the child's browser still acts on old rules   | The extension refreshes its policy every 5 minutes and on startup. Close and reopen the child's Chrome to force a refresh immediately. |
-| You're on the child's own laptop (not a Chromebook)?            | Works fine — install Chrome, use the same `extension/` folder with *Load unpacked*. |
+| Symptom | First thing to check |
+| ------- | -------------------- |
+| Console shows *server offline* | Is the server running? Same Wi-Fi? Right IP and port 4100? |
+| "Guardian PIN is not configured" | The server was started without `CHPC_GUARDIAN_PIN`. Set it and restart. |
+| Popup says the code is not recognised | Codes are letters only, no digits — retype it, or revoke and generate a new one. Check the console address (include `http://`). |
+| Child can browse but no limits apply | Devices tab: is *last seen* recent? If not, the extension is off, unpaired or cannot reach the server. Reload it from `chrome://extensions`. |
+| Usage stays at 0 | Minutes are only counted while the child is active in a focused Chrome window. If it stays at 0 while they browse, see the previous row. |
+| A site I blocked still opens | Match is by site name: `bbc.co.uk` blocks `www.bbc.co.uk` and `news.bbc.co.uk`, but not `bbc.com`. Add each. |
+| Rules changed but the Chromebook still acts on old ones | It refreshes every minute. The popup's **Refresh now** forces it. |
+| Wrong day boundary / off day starts at the wrong time | Check the time zone in **Settings**. |
+| Locked out after too many PIN attempts | Wait 15 minutes, or restart the server. |
+| Using a normal laptop instead of a Chromebook | Works the same: install Chrome, load the same `extension/` folder unpacked. |
 
 ## Privacy
 
-- Rules, kids, usage — all in one SQLite file on your machine
-  (default `server/data.db`).
-- Nothing leaves the family network except the child's own browsing traffic,
-  which goes to the sites they actually visit.
-- You can delete a child (name + usage + pairings) from the console; a
-  database rebuild is just deleting that file.
+- Rules, children, devices and usage live in **one SQLite file** on your
+  machine (`data/chpc.db`, or the `/data` volume in Docker). Back it up if you
+  care about the rules; deleting it is a full reset.
+- Only the **site name** (hostname) of what the child visits is recorded —
+  never full page addresses, searches or page content.
+- Usage older than **90 days** is deleted automatically
+  (`CHPC_RETENTION_DAYS` changes this).
+- Nothing leaves your home network: no accounts, no telemetry, no cloud.
+- Deleting a child deletes everything about them immediately.
 
 ## Files worth knowing
 
-| Path                 | What it is                                            |
-| -------------------- | ------------------------------------------------------ |
-| `server/data.db`     | Your data. Back this up if you don't want to lose rules. |
-| `server/src/app.js`  | All the routes — useful if a developer wants to add one. |
-| `core/src/policy.js` | The single decision engine — the thing that says allow or deny. |
-| `web/dist/`          | The built console the server serves.                   |
-| `docs/HLD.md`        | High-level design (what and why).                       |
-| `docs/LLD.md`        | Low-level design (module-level, API, and extension spec). |
+| Path | What it is |
+| ---- | ---------- |
+| `data/chpc.db` | Your data (bare-Node install). Docker: the `chpc-data` volume. |
+| `.env` | Your PIN and settings (Docker). Keep it private. |
+| `extension/` | The folder to load on each Chromebook. |
+| `docs/SECURITY-REPORT.md` | What was reviewed, what was fixed, what remains. |
+| `docs/HLD.md`, `docs/LLD.md` | Design documents, if a developer helps you. |
