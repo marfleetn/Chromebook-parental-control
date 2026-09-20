@@ -6,7 +6,7 @@
 #   docker build -t chpc .
 #   docker run -p 4100:4100 -v chpc-data:/data chpc     (setup code appears in the log)
 
-FROM node:22-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 
 # 1) Install (workspaces: core, server, web)
@@ -22,7 +22,7 @@ COPY web/    web/
 RUN npm run build:web && test -f web/dist/index.html
 
 # ---- runtime ----
-FROM node:22-alpine
+FROM node:25-alpine
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4100 \
