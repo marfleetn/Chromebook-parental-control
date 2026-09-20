@@ -1,82 +1,298 @@
 // @chpc/server — Express API.
+//
+// Route families and who may call them:
+//   /api/health                 anyone (liveness; reveals nothing)
+//   /api/devices/:code/*        the paired Chromebook — the pairing code IS the credential
+//   /api/auth/check, /api/settings, /api/kids/**   the parent — guardian PIN required
 import express from 'express';
-import cors from 'cors';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  openDb, listKids, getKid, createKid, deleteKid,
+  openDb, listKids, getKid, createKid, renameKid, deleteKid,
   getPolicy, setPolicy,
   listDevices, deviceForCode, pairDevice, touchDevice, deleteDevice,
   getSetting, setSetting,
-  addUsage, usageRowsSince,
+  addUsage, usageRowsSince, usageTotalBetween, purgeUsageOlderThan, formatCode, makeCode, normalizeCode,
 } from './db.js';
 import { effectivePolicyForKid, kidStatus, dayStartMs } from './status.js';
-import { decide, remainingDaily, ruleMatchesHost } from '@chpc/core';
+import { makeRequirePin, RateLimiter, hashPin, pinProblem } from './auth.js';
+import {
+  validatePolicy, validateName, validateAgentId, validTimeZone, clampInt, LIMITS,
+} from './validate.js';
+import { decide, ruleMatchesHost, getHost } from '@chpc/core';
 
 const DEFAULT_TZ = 'Europe/London';
+const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * @param {object} opts
+ *   dbFile          SQLite path (default ./data/chpc.db)
+ *   publicDir       built console to serve at / (optional)
+ *   guardianPin     PIN fixed by the environment (CHPC_GUARDIAN_PIN); null = use the
+ *                   hash stored in the database, or first-run setup if there is none
+ *   allowNoPin      serve parent routes without a PIN while none is set (loopback dev only)
+ *   setupCode       override the generated one-time setup code (tests)
+ *   setupCodeFile   path to write the setup code to (0600) while setup is pending
+ *   corsOrigins     array of origins allowed to call the API cross-origin (default none)
+ *   trustProxy      express 'trust proxy' setting (default false)
+ *   retentionDays   purge usage older than this at startup / on purge() (0 = keep forever)
+ *   log             logger fn for warnings (default console.warn)
+ */
 export function createApp(opts = {}) {
   const dbFile = opts.dbFile || process.env.CHPC_DB || path.join(process.cwd(), 'data', 'chpc.db');
   const db = openDb(dbFile);
   const publicDir = opts.publicDir ? path.resolve(opts.publicDir) : null;
+  const log = opts.log || console.warn;
+  const corsOrigins = Array.isArray(opts.corsOrigins) ? opts.corsOrigins.filter(Boolean) : [];
+  const retentionDays = Number.isFinite(Number(opts.retentionDays)) ? Number(opts.retentionDays) : 0;
 
-  const tzOf = (req) =>
-    req?.headers?.['x-chpc-tz'] ||
-    getSetting(db, 'tz', undefined) ||
-    DEFAULT_TZ;
+  const tzOf = () => {
+    const tz = getSetting(db, 'tz', undefined);
+    return validTimeZone(tz) ? tz : DEFAULT_TZ;
+  };
 
   const app = express();
-  app.use(cors());
+  app.disable('x-powered-by');
+  if (opts.trustProxy) app.set('trust proxy', opts.trustProxy);
+
+  // ---- security headers + CORS ---------------------------------------------
+  app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    res.set('Cross-Origin-Opener-Policy', 'same-origin');
+    res.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+      "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+    if (req.path.startsWith('/api')) res.set('Cache-Control', 'no-store');
+
+    const origin = req.get('origin');
+    if (origin && corsOrigins.includes(origin)) {
+      res.set('Access-Control-Allow-Origin', origin);
+      res.set('Vary', 'Origin');
+      res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'Content-Type, X-Guardian-PIN, Authorization');
+      res.set('Access-Control-Max-Age', '600');
+    }
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    next();
+  });
   app.use(express.json({ limit: '256kb' }));
 
-  const err = (res, code, msg, extra = {}) =>
-    res.status(code).json({ error: msg, ...extra });
+  // ---- guardian PIN source ---------------------------------------------------
+  const envPin = opts.guardianPin || null;
+  const getPin = () => {
+    if (envPin) return { source: 'env', pin: envPin };
+    const hash = getSetting(db, 'pinHash', null);
+    if (typeof hash === 'string' && hash) return { source: 'db', hash };
+    return { source: 'none' };
+  };
+  const requirePin = makeRequirePin({
+    getPin,
+    allowNoPin: !!opts.allowNoPin,
+    limiter: new RateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 }),
+    log,
+  });
+  // First-run setup: while no PIN exists, a one-time code (printed by index.js,
+  // optionally written to a 0600 file) authorises choosing one from the console.
+  let setupCode = null;
+  const setupLimiter = new RateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+  const needsSetup = () => getPin().source === 'none' && !opts.allowNoPin;
+  const writeSetupFile = () => {
+    if (!opts.setupCodeFile) return;
+    try {
+      if (setupCode) fs.writeFileSync(opts.setupCodeFile, setupCode + '\n', { mode: 0o600 });
+      else if (fs.existsSync(opts.setupCodeFile)) fs.unlinkSync(opts.setupCodeFile);
+    } catch (e) { log('[chpc-server] could not update setup code file', e && e.message); }
+  };
+  if (needsSetup()) { setupCode = normalizeCode(opts.setupCode) || makeCode(); writeSetupFile(); }
+  // Unknown pairing codes are rate-limited per client so codes can't be enumerated.
+  const codeLimiter = new RateLimiter({ limit: 20, windowMs: 15 * 60 * 1000 });
+
+  // ---- helpers -------------------------------------------------------------
+  const err = (res, code, msg, extra = {}) => res.status(code).json({ error: msg, ...extra });
   const kidOr404 = (res, id) => {
-    const k = getKid(db, Number(id));
+    const n = Number(id);
+    const k = Number.isInteger(n) ? getKid(db, n) : undefined;
     if (!k) { err(res, 404, 'kid not found'); return null; }
     return k;
   };
+  const pubKid = (k) => ({ id: k.id, name: k.name, createdAt: k.created_at });
   const pubDev = (d) => ({
-    code: d.code, kidId: d.kid_id,
-    agentId: d.agent_id && d.agent_id.length > 6 ? d.agent_id.slice(0,3)+'\u2026'+d.agent_id.slice(-3) : d.agent_id,
-    pairedAt: d.paired_at, lastSeen: d.last_seen,
+    code: d.code, codeDisplay: formatCode(d.code), kidId: d.kid_id,
+    agentId: d.agent_id, pairedAt: d.paired_at, lastSeen: d.last_seen,
+  });
+  const deviceOr404 = (req, res) => {
+    const d = deviceForCode(db, String(req.params.code || ''));
+    if (!d) {
+      const key = req.ip || 'unknown';
+      codeLimiter.fail(key);
+      err(res, 404, 'unknown pairing code');
+      return null;
+    }
+    return d;
+  };
+  const codeGuard = (req, res, next) => {
+    if (codeLimiter.blocked(req.ip || 'unknown')) {
+      res.set('Retry-After', '900');
+      return err(res, 429, 'too many unknown pairing codes from this address — try again later');
+    }
+    next();
+  };
+
+  // ---- public --------------------------------------------------------------
+  app.get('/api/health', (req, res) => res.json({ ok: true, service: 'chpc-server' }));
+
+  // ---- first-run setup (public; guarded by the one-time setup code) ---------
+  app.get('/api/setup/status', (req, res) =>
+    res.json({ needsSetup: needsSetup(), pinSource: getPin().source }));
+  app.post('/api/setup', (req, res) => {
+    if (!needsSetup()) return err(res, 409, 'the guardian PIN is already set', { code: 'already-set-up' });
+    const key = req.ip || 'unknown';
+    if (setupLimiter.blocked(key)) {
+      res.set('Retry-After', '900');
+      return err(res, 429, 'too many setup attempts — try again later', { code: 'locked-out' });
+    }
+    const body = req.body || {};
+    const supplied = normalizeCode(body.setupCode);
+    if (!supplied || !setupCode || supplied.length !== setupCode.length ||
+        !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(setupCode))) {
+      setupLimiter.fail(key);
+      return err(res, 401, 'setup code is wrong — it is printed in the server log', { code: 'setup-code-wrong', field: 'setupCode' });
+    }
+    const problem = pinProblem(body.pin);
+    if (problem) return err(res, 400, problem, { field: 'pin' });
+    setSetting(db, 'pinHash', hashPin(body.pin));
+    setupCode = null;
+    writeSetupFile();
+    requirePin.invalidate();
+    log('[chpc-server] guardian PIN set up from ' + key);
+    res.status(201).json({ ok: true, pinSource: 'db' });
   });
 
-  app.get('/api/health', (req, res) =>
-    res.json({ ok: true, service: 'chpc-server', time: new Date().toISOString() }));
+  // ---- device routes (pairing-code auth) -----------------------------------
+  app.get('/api/devices/:code', codeGuard, (req, res) => {
+    const d = deviceOr404(req, res);
+    if (!d) return;
+    touchDevice(db, d.code);
+    const tz = tzOf();
+    const kid = getKid(db, d.kid_id);
+    const now = Date.now();
+    const policy = effectivePolicyForKid(db, d.kid_id, now, tz);
+    const rawHost = typeof req.query.host === 'string' ? req.query.host.trim().toLowerCase().slice(0, LIMITS.pattern) : '';
+    const host = rawHost ? getHost(rawHost) : null;
+    res.json({
+      device: { ...pubDev(d), timeZone: tz },
+      kid: kid ? { id: kid.id, name: kid.name } : null,
+      timeZone: tz,
+      policy,
+      decision: host ? decide(policy, host, { now, tz }) : null,
+    });
+  });
+  app.post('/api/devices/:code/heartbeat', codeGuard, (req, res) => {
+    const d = deviceOr404(req, res);
+    if (!d) return;
+    touchDevice(db, d.code);
+    res.json({ ok: true, timeZone: tzOf() });
+  });
+  app.post('/api/devices/:code/usage', codeGuard, (req, res) => {
+    const d = deviceOr404(req, res);
+    if (!d) return;
+    const tz = tzOf();
+    const body = req.body || {};
+    const now = Date.now();
 
-  app.get('/api/settings', (req, res) =>
-    res.json({ timezone: getSetting(db, 'tz', DEFAULT_TZ) }));
-  app.put('/api/settings', (req, res) => {
-    if (req.body && typeof req.body.timezone === 'string' && req.body.timezone) {
-      try { new Intl.DateTimeFormat('en-US', { timeZone: req.body.timezone }); }
-      catch { return err(res, 400, 'timezone is not a valid IANA time zone'); }
-      setSetting(db, 'tz', req.body.timezone);
+    // Accept one report {site|url, seconds} or a batch {entries:[{site, seconds}]}.
+    const entries = Array.isArray(body.entries) ? body.entries.slice(0, 100) : [body];
+    const recorded = [];
+    for (const e of entries) {
+      if (!e || typeof e !== 'object') continue;
+      const url = typeof e.url === 'string' ? e.url : '';
+      const site = getHost(typeof e.site === 'string' && e.site ? e.site : url);
+      if (!site) continue;
+      let seconds = Math.round(Number(e.seconds));
+      if (!Number.isFinite(seconds) || seconds <= 0) seconds = 60;
+      seconds = Math.min(seconds, LIMITS.usageSecondsMax);
+      // The server clock is authoritative: a device cannot back-date usage.
+      const stamp = new Date(now).toISOString();
+      addUsage(db, { kidId: d.kid_id, site, startedAt: stamp, endedAt: stamp, seconds });
+      recorded.push({ site, seconds });
     }
-    res.json({ timezone: getSetting(db, 'tz', DEFAULT_TZ) });
+    touchDevice(db, d.code);
+
+    const policy = effectivePolicyForKid(db, d.kid_id, now, tz);
+    const single = entries.length === 1 && recorded.length === 1 ? recorded[0].site : null;
+    res.json({
+      ok: true,
+      recorded: Array.isArray(body.entries) ? recorded : (recorded[0] || null),
+      decision: single ? decide(policy, single, { now, tz }) : null,
+      status: kidStatus(db, d.kid_id, now, tz),
+    });
+  });
+
+  // ---- parent routes (guardian PIN) ----------------------------------------
+  app.use(['/api/auth', '/api/settings', '/api/kids'], requirePin);
+
+  app.get('/api/auth/check', (req, res) => res.json({ ok: true, pinSource: getPin().source }));
+  app.put('/api/auth/pin', (req, res) => {
+    if (getPin().source === 'env') {
+      return err(res, 409, 'the PIN is fixed by CHPC_GUARDIAN_PIN on the server; change it there', { code: 'pin-managed-by-env' });
+    }
+    const problem = pinProblem(req.body?.pin);
+    if (problem) return err(res, 400, problem, { field: 'pin' });
+    setSetting(db, 'pinHash', hashPin(req.body.pin));
+    requirePin.invalidate();
+    log('[chpc-server] guardian PIN changed from ' + (req.ip || 'unknown'));
+    res.json({ ok: true, pinSource: 'db' });
+  });
+
+  app.get('/api/settings', (req, res) => res.json({ timezone: tzOf(), retentionDays, pinSource: getPin().source }));
+  app.put('/api/settings', (req, res) => {
+    const tz = req.body && req.body.timezone;
+    if (tz !== undefined) {
+      if (!validTimeZone(tz)) return err(res, 400, 'timezone is not a valid IANA time zone', { field: 'timezone' });
+      setSetting(db, 'tz', tz);
+    }
+    res.json({ timezone: tzOf(), retentionDays, pinSource: getPin().source });
   });
 
   app.get('/api/kids', (req, res) => {
     const now = Date.now();
-    const tz = tzOf(req);
-    res.json({ kids: listKids(db).map((k) => ({ ...k, status: kidStatus(db, k.id, now, tz) })) });
+    const tz = tzOf();
+    res.json({
+      kids: listKids(db).map((k) => ({
+        ...pubKid(k),
+        status: kidStatus(db, k.id, now, tz),
+        devices: listDevices(db, k.id).map(pubDev),
+      })),
+    });
   });
   app.post('/api/kids', (req, res) => {
-    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-    if (!name) return err(res, 400, 'name is required');
-    res.status(201).json({ kid: createKid(db, name) });
+    const v = validateName(req.body?.name);
+    if (v.error) return err(res, 400, v.error, { field: v.field });
+    if (listKids(db).length >= 50) return err(res, 400, 'too many children (max 50)');
+    res.status(201).json({ kid: pubKid(createKid(db, v.name)) });
   });
   app.get('/api/kids/:id', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
     const now = Date.now();
-    const tz = tzOf(req);
+    const tz = tzOf();
     res.json({
-      kid: k,
+      kid: pubKid(k),
       policy: getPolicy(db, k.id),
       status: kidStatus(db, k.id, now, tz),
       devices: listDevices(db, k.id).map(pubDev),
     });
+  });
+  app.patch('/api/kids/:id', (req, res) => {
+    const k = kidOr404(res, req.params.id);
+    if (!k) return;
+    const v = validateName(req.body?.name);
+    if (v.error) return err(res, 400, v.error, { field: v.field });
+    res.json({ kid: pubKid(renameKid(db, k.id, v.name)) });
   });
   app.delete('/api/kids/:id', (req, res) => {
     const k = kidOr404(res, req.params.id);
@@ -88,11 +304,9 @@ export function createApp(opts = {}) {
   app.get('/api/kids/:id/policy', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
-    const tz = tzOf(req);
-    const now = Date.now();
     res.json({
       policy: getPolicy(db, k.id),
-      effective: effectivePolicyForKid(db, k.id, now, tz),
+      effective: effectivePolicyForKid(db, k.id, Date.now(), tzOf()),
     });
   });
   app.put('/api/kids/:id/policy', (req, res) => {
@@ -107,81 +321,25 @@ export function createApp(opts = {}) {
   app.post('/api/kids/:id/pairings', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
-    const agentId = typeof req.body?.agentId === 'string' ? req.body.agentId.slice(0, 200) : '';
-    const code = pairDevice(db, k.id, agentId || 'pending');
-    res.status(201).json({ code, pairedAt: new Date().toISOString() });
+    const v = validateAgentId(req.body?.agentId ?? req.body?.label);
+    if (v.error) return err(res, 400, v.error, { field: v.field });
+    if (listDevices(db, k.id).length >= 20) return err(res, 400, 'too many devices for this child (max 20)');
+    const code = pairDevice(db, k.id, v.agentId);
+    res.status(201).json({ code, codeDisplay: formatCode(code), pairedAt: new Date().toISOString() });
   });
   app.delete('/api/kids/:id/pairings/:code', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
-    const d = deviceForCode(db, String(req.params.code || '').trim());
+    const d = deviceForCode(db, String(req.params.code || ''));
     if (!d || d.kid_id !== k.id) return err(res, 404, 'device not found for this kid');
     deleteDevice(db, d.code);
     res.json({ deleted: d.code });
   });
 
-  app.get('/api/devices/:code', (req, res) => {
-    const d = deviceForCode(db, String(req.params.code || '').trim());
-    if (!d) return err(res, 404, 'unknown pairing code');
-    const tz = tzOf(req);
-    const kid = getKid(db, d.kid_id);
-    const now = Date.now();
-    const policy = effectivePolicyForKid(db, d.kid_id, now, tz);
-    const rawHost = String(req.query.host || '').trim().toLowerCase();
-    const host = rawHost ? (rawHost.includes('.') ? rawHost : `*${rawHost}`) : null;
-    res.json({
-      device: pubDev(d),
-      kid,
-      policy,
-      decision: host ? decide(policy, host, { now, tz }) : null,
-    });
-  });
-  app.post('/api/devices/:code/heartbeat', (req, res) => {
-    const d = deviceForCode(db, String(req.params.code || '').trim());
-    if (!d) return err(res, 404, 'unknown pairing code');
-    touchDevice(db, d.code);
-    res.json({ ok: true, timeZone: getSetting(db, 'tz', DEFAULT_TZ) });
-  });
-  app.post('/api/devices/:code/usage', (req, res) => {
-    const d = deviceForCode(db, String(req.params.code || '').trim());
-    if (!d) return err(res, 404, 'unknown pairing code');
-    const tz = tzOf(req);
-    const body = req.body || {};
-    const url = typeof body.url === 'string' ? body.url : '';
-    const site = typeof body.site === 'string' && body.site
-      ? body.site
-      : (url ? safeHost(url) : '');
-    const now = Date.now();
-    const startedAt = body.startedAt ? Date.parse(body.startedAt) : now;
-    const endedAt = body.endedAt ? Date.parse(body.endedAt) : now;
-    let seconds = Number(body.seconds);
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      seconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
-      if (!seconds) seconds = 60;
-    }
-    addUsage(db, {
-      kidId: d.kid_id,
-      site,
-      url,
-      startedAt: new Date(startedAt).toISOString(),
-      endedAt: new Date(endedAt).toISOString(),
-      seconds,
-    });
-    // Evaluate the decision on this URL so the extension can get a
-    // consistent block reason without re-pulling the policy.
-    const policy = effectivePolicyForKid(db, d.kid_id, now, tz);
-    const decision = decide(policy, url || site || '*', { now, tz });
-    res.json({
-      ok: true,
-      recorded: { site, seconds },
-      decision,
-    });
-  });
-
   app.get('/api/kids/:id/usage/today', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
-    const tz = tzOf(req);
+    const tz = tzOf();
     const now = Date.now();
     const rows = usageRowsSince(db, k.id, dayStartMs(now, tz));
     const bySite = new Map();
@@ -198,12 +356,7 @@ export function createApp(opts = {}) {
       .slice(0, 50)
       .map((s) => {
         const match = budgets.find((b) => b && b.pattern != null && ruleMatchesHost(b.pattern, s.site));
-        return {
-          site: s.site,
-          minutes: Math.floor(s.seconds / 60),
-          visits: s.visits,
-          budgetMinutes: match ? match.minutes : null,
-        };
+        return { site: s.site, minutes: Math.floor(s.seconds / 60), visits: s.visits, budgetMinutes: match ? match.minutes : null };
       });
     res.json({
       ts: now, tz,
@@ -216,103 +369,49 @@ export function createApp(opts = {}) {
   app.get('/api/kids/:id/usage/history', (req, res) => {
     const k = kidOr404(res, req.params.id);
     if (!k) return;
-    const tz = tzOf(req);
+    const tz = tzOf();
     const days = clampInt(req.query.days, 1, 90, 7);
-    const out = [];
     const now = Date.now();
-    const DAY = 24 * 60 * 60 * 1000;
     const todayStart = dayStartMs(now, tz);
+    const out = [];
     for (let i = 0; i < days; i++) {
-      const end = i === 0 ? now : todayStart - (i - 1) * DAY;
-      const start = end - DAY;
-      const row = db.prepare(
-        'SELECT COALESCE(SUM(seconds), 0) AS s, COUNT(*) AS n FROM usage WHERE kid_id = ? AND started_at >= ? AND started_at < ?'
-      ).get(k.id, new Date(start).toISOString(), new Date(end).toISOString());
-      out.push({
-        isoDay: dateLabel(i === 0 ? todayStart : start, tz),
-        minutes: Math.floor(Number(row.s) / 60),
-        visits: Number(row.n),
-      });
+      // Day i: [todayStart - i*DAY, todayStart - (i-1)*DAY), today runs to `now`.
+      const start = todayStart - i * DAY;
+      const end = i === 0 ? now : start + DAY;
+      const t = usageTotalBetween(db, k.id, start, end);
+      out.push({ isoDay: dateLabel(start, tz), minutes: Math.floor(t.seconds / 60), visits: t.visits });
     }
     out.reverse();
     res.json({ days, perDay: out, timezone: tz });
   });
 
+  // ---- static console ------------------------------------------------------
   if (publicDir && fs.existsSync(publicDir)) {
-    app.use(express.static(publicDir));
-    app.get(/.html?$/, (req, res, next) => {
-      if (req.path.startsWith('/api')) return next();
+    app.use(express.static(publicDir, { index: 'index.html', maxAge: '1h' }));
+    app.get(/^\/(?!api(\/|$)).*/, (req, res, next) => {
+      if (!req.accepts('html')) return next();
+      res.set('Cache-Control', 'no-cache');
       res.sendFile(path.join(publicDir, 'index.html'));
     });
   }
 
-  app.use((req, res) => err(res, 404, 'not found', { path: req.path }));
+  app.use((req, res) => err(res, 404, 'not found'));
+  // eslint-disable-next-line no-unused-vars
   app.use((e, req, res, _next) => {
-    const status = e.status || 500;
-    if (status >= 500) console.error('[chpc-server]', e);
+    const status = e.status || e.statusCode || 500;
+    if (status >= 500) log('[chpc-server]', e);
+    if (e.type === 'entity.parse.failed') return err(res, 400, 'request body is not valid JSON');
+    if (e.type === 'entity.too.large') return err(res, 413, 'request body too large');
     res.status(status).json({ error: status >= 500 ? 'server error' : (e.message || 'error') });
   });
 
-  return { app, db };
+  const purge = () => (retentionDays > 0 ? purgeUsageOlderThan(db, retentionDays) : 0);
+  purge();
+
+  return { app, db, purge, getSetupCode: () => setupCode, needsSetup };
 }
 
 // ---------- helpers ----------
-function validatePolicy(body) {
-  if (body === undefined || body === null) return { policy: {} };
-  if (typeof body !== 'object' || Array.isArray(body)) return { error: 'policy must be a JSON object', field: 'body' };
-  const p = { ...body };
-  if (p.internetAllowed === undefined) p.internetAllowed = true;
-  if (typeof p.internetAllowed !== 'boolean') return { error: 'internetAllowed must be a boolean', field: 'internetAllowed' };
-  if (p.mode === undefined) p.mode = 'unrestricted';
-  if (!['unrestricted', 'strict', 'denylist', 'allowlist'].includes(p.mode)) {
-    return { error: 'invalid mode', field: 'mode' };
-  }
-  if (p.dailyMinutes !== undefined && p.dailyMinutes !== null) {
-    if (!Number.isFinite(Number(p.dailyMinutes)) || Number(p.dailyMinutes) < 0) {
-      return { error: 'dailyMinutes must be a non-negative number (minutes)', field: 'dailyMinutes' };
-    }
-    p.dailyMinutes = Number(p.dailyMinutes);
-  }
-  for (const key of ['deny', 'allow']) {
-    if (p[key] === undefined) continue;
-    if (!Array.isArray(p[key]) || !p[key].every((x) => typeof x === 'string' && x.trim().length)) {
-      return { error: key + ' must be an array of non-empty strings', field: key };
-    }
-    p[key] = p[key].map((x) => x.trim().toLowerCase());
-  }
-  if (p.siteBudgets !== undefined) {
-    if (!Array.isArray(p.siteBudgets)) return { error: 'siteBudgets must be an array', field: 'siteBudgets' };
-    for (const sb of p.siteBudgets) {
-      if (!sb || typeof sb !== 'object' || typeof sb.pattern !== 'string' || !sb.pattern.trim()) {
-        return { error: 'siteBudgets entries need a non-empty pattern string', field: 'siteBudgets' };
-      }
-      if (sb.minutes !== undefined && (sb.minutes === null ? false : !Number.isFinite(Number(sb.minutes)))) {
-        return { error: 'siteBudgets entries need a numeric minutes value', field: 'siteBudgets' };
-      }
-      sb.pattern = sb.pattern.trim().toLowerCase();
-    }
-  }
-  if (p.windows !== undefined) {
-    if (!Array.isArray(p.windows)) return { error: 'windows must be an array', field: 'windows' };
-    for (const w of p.windows) {
-      if (!w || typeof w !== 'object') return { error: 'windows entries must be objects', field: 'windows' };
-      if (w.days !== undefined && (!Array.isArray(w.days) || !w.days.every((x) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].includes(x)))) {
-        return { error: 'windows[*].days must be weekday names', field: 'windows.days' };
-      }
-      if (w.start !== undefined && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(w.start)) {
-        return { error: 'windows[*].start must be HH:MM (24h)', field: 'windows.start' };
-      }
-      if (w.end !== undefined && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(w.end)) {
-        return { error: 'windows[*].end must be HH:MM (24h)', field: 'windows.end' };
-      }
-    }
-  }
-  if (p.offDays !== undefined && !Array.isArray(p.offDays)) {
-    return { error: 'offDays must be an array', field: 'offDays' };
-  }
-  return { policy: p };
-}
-function safeHost(u) { try { return new URL(u).hostname; } catch { return ''; } }
 function dateLabel(ms, tz) {
   const p = {};
   for (const { type, value } of new Intl.DateTimeFormat('en-CA', {
@@ -320,9 +419,3 @@ function dateLabel(ms, tz) {
   }).formatToParts(new Date(ms))) p[type] = value;
   return `${p.year}-${p.month}-${p.day}`;
 }
-function clampInt(v, lo, hi, fb) {
-  const n = typeof v === 'string' ? parseInt(v, 10) : typeof v === 'number' ? v : Number(v);
-  if (!Number.isFinite(n)) return fb;
-  return Math.min(hi, Math.max(lo, n));
-}
-

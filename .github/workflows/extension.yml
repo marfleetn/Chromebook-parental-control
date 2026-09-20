@@ -1,0 +1,40 @@
+name: Extension
+# The Chrome extension is exercised in a real Chromium: rules accepted by
+# declarativeNetRequest, lock page with reason, block-all, usage flush,
+# PIN-gated unpair — plus the console's first-run setup and main flows.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Manifest V3 sanity, bundle freshness, no inline scripts
+        run: npm run build:ext && git diff --exit-code -- extension/vendor/core.js
+      - name: Manifest facts
+        run: node -e "const m=require('./extension/manifest.json');if(m.manifest_version!==3)process.exit(1);console.log('MV'+m.manifest_version,'v'+m.version,'Chrome >=',m.minimum_chrome_version,'permissions:',m.permissions.join(','))"
+  e2e-chromium:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm i --no-save --no-audit --no-fund playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Extension end-to-end (real Chromium)
+        run: npm run e2e:ext
+      - name: Console end-to-end (real Chromium)
+        run: npm run e2e:web

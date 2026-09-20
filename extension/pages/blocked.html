@@ -44,30 +44,27 @@
   .card .k { color: var(--ink-soft); }
   .card .v { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
   footer { margin-top: 22px; font-size: 11px; color: var(--ink-soft); }
+  .actions { margin-top: 16px; }
+  button {
+    font: inherit; font-size: 13px; padding: 8px 14px; cursor: pointer;
+    background: var(--ink); color: var(--paper); border: 1px solid var(--ink); border-radius: var(--corner);
+  }
 </style>
 </head>
 <body>
   <main>
     <div class="kicker">Family policy</div>
-    <h1>This site&#8217;s not allowed right now</h1>
-    <p>The console policy blocks this destination. If you&#8217;re a parent, check
-       your console for the current rules.</p>
+    <h1 id="title">This site&#8217;s not allowed right now</h1>
+    <p id="lede">The family rules block this destination. If you&#8217;re a parent, check
+       the console for the current rules.</p>
     <div class="card">
-      <div class="row"><span class="k">URL</span>     <span class="v" id="url">&#8212;</span></div>
+      <div class="row"><span class="k">Site</span>    <span class="v" id="url">&#8212;</span></div>
       <div class="row"><span class="k">Reason</span>  <span class="v" id="reason">blocked by policy</span></div>
-      <div class="row"><span class="k">Time</span>      <span class="v" id="when">&#8212;</span></div>
+      <div class="row"><span class="k">Time</span>    <span class="v" id="when">&#8212;</span></div>
     </div>
+    <div class="actions"><button id="back">Go back</button></div>
     <footer>CHPC Family &middot; self-hosted</footer>
   </main>
-  <script>
-    (function () {
-      const q = new URLSearchParams(location.search);
-      const u = q.get('url') || document.referrer || '';
-      const r = q.get('reason') || 'blocked by policy';
-      document.getElementById('url').textContent = u || '(direct)';
-      document.getElementById('reason').textContent = r;
-      document.getElementById('when').textContent = new Date().toLocaleString();
-    })();
-  </script>
+  <script src="blocked.js"></script>
 </body>
 </html>

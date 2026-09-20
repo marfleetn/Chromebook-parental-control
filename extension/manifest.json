@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "CHPC Family",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted parental controls for family Chromebooks. Policy lives on the parent's console; this extension applies it.",
   "minimum_chrome_version": "116",
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "CHPC Family" },
-  "permissions": ["storage", "declarativeNetRequest", "webRequest", "tabs", "alarms"],
+  "permissions": ["storage", "declarativeNetRequest", "tabs", "alarms", "idle"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     { "resources": ["pages/blocked.html"], "matches": ["http://*/*", "https://*/*"] }

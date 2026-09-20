@@ -1,0 +1,38 @@
+name: Security
+# Dependency advisories (fails on any runtime vulnerability) and CodeQL static
+# analysis of the server, console and extension JavaScript. Runs on every push,
+# every PR and weekly so new advisories surface without a code change.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Runtime dependencies must be advisory-free
+        run: npm audit --omit=dev
+      - name: Whole tree (dev toolchain) — report only
+        run: npm audit || true
+  codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

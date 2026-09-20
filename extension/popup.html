@@ -59,7 +59,9 @@
   label span {
     display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 3px;
   }
-  input[type="text"] {
+  .preview { font-size: 12px; padding: 6px 8px; background: #fff; border: 1px solid var(--paper-2); border-radius: var(--corner); }
+  .muted { font-size: 11px; color: var(--ink-soft); }
+  input[type="text"], input[type="password"] {
     width: 100%;
     box-sizing: border-box;
     padding: 6px 8px;
@@ -71,7 +73,7 @@
     border-radius: var(--corner);
     color: var(--ink);
   }
-  input[type="text"]:focus { outline: 2px solid var(--brass-soft); outline-offset: 1px; border-color: var(--brass-soft); }
+  input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--brass-soft); outline-offset: 1px; border-color: var(--brass-soft); }
   button {
     font: inherit;
     padding: 7px 12px;
@@ -104,16 +106,14 @@
   </header>
 
   <div class="status">
-    <div>
-      <span id="status-text" class="kid">—</span>
-    </div>
+    <div><span id="status-text" class="kid">&#8212;</span></div>
     <div class="dot wait" id="dot"></div>
   </div>
 
   <section id="pair-section">
     <label>
-      <span>Pairing code</span>
-      <input type="text" id="pair-code" placeholder="e.g. abc-123" autocomplete="off" spellcheck="false">
+      <span>Pairing code (from the parent console, Devices tab)</span>
+      <input type="text" id="pair-code" placeholder="e.g. KTRM-XPBD" autocomplete="off" spellcheck="false" autocapitalize="characters">
     </label>
     <label>
       <span>Console address</span>
@@ -121,20 +121,30 @@
     </label>
     <div class="row">
       <button id="pair-btn">Pair &amp; connect</button>
-      <button id="unpair-btn" class="secondary" hidden>Forget</button>
     </div>
-    <div class="msg" id="msg"></div>
   </section>
 
-  <section id="policy-section" hidden>
+  <section id="paired-section" hidden>
     <label>
-      <span>Current policy</span>
-      <input type="text" id="policy-preview" readonly>
+      <span>Current rules</span>
+      <div id="policy-preview" class="preview">&#8212;</div>
     </label>
-    <button id="refresh-btn" class="secondary">Refresh policy now</button>
+    <div class="row">
+      <button id="refresh-btn" class="secondary">Refresh now</button>
+      <span id="rules-count" class="muted"></span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="show-forget-btn" class="secondary">Unpair (parents)</button>
+    </div>
+    <div id="forget-row" class="row" hidden style="margin-top:8px">
+      <input type="password" id="pin" placeholder="Guardian PIN" autocomplete="off" style="flex:1">
+      <button id="forget-btn">Unpair</button>
+    </div>
   </section>
 
-  <footer id="foot">CHPC &middot; self-hosted &middot; v0.1.0</footer>
+  <div class="msg" id="msg" style="padding:0 14px"></div>
+
+  <footer id="foot">CHPC &middot; self-hosted &middot; v0.2.0</footer>
 
   <script src="popup.js"></script>
 </body>
