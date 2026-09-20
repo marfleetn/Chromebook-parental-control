@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site not allowed</title>
+<style>
+  :root {
+    --paper: #f7f4ee;
+    --paper-2: #efeadd;
+    --ink: #22201c;
+    --ink-soft: #6b655b;
+    --brass: #a07c2c;
+    --corner: 3px;
+  }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  main { max-width: 460px; width: 100%; }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+  h1 { font-size: 24px; font-weight: 600; margin: 6px 0 10px; }
+  p { color: var(--ink-soft); margin: 0 0 18px; }
+  .card {
+    background: var(--paper-2);
+    border: 1px solid #e3ddd0;
+    border-radius: var(--corner);
+    padding: 14px 16px;
+    font-size: 13px;
+  }
+  .card .row { display: flex; justify-content: space-between; padding: 4px 0; }
+  .card .k { color: var(--ink-soft); }
+  .card .v { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
+  footer { margin-top: 22px; font-size: 11px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+  <main>
+    <div class="kicker">Family policy</div>
+    <h1>This site&#8217;s not allowed right now</h1>
+    <p>The console policy blocks this destination. If you&#8217;re a parent, check
+       your console for the current rules.</p>
+    <div class="card">
+      <div class="row"><span class="k">URL</span>     <span class="v" id="url">&#8212;</span></div>
+      <div class="row"><span class="k">Reason</span>  <span class="v" id="reason">blocked by policy</span></div>
+      <div class="row"><span class="k">Time</span>      <span class="v" id="when">&#8212;</span></div>
+    </div>
+    <footer>CHPC Family &middot; self-hosted</footer>
+  </main>
+  <script>
+    (function () {
+      const q = new URLSearchParams(location.search);
+      const u = q.get('url') || document.referrer || '';
+      const r = q.get('reason') || 'blocked by policy';
+      document.getElementById('url').textContent = u || '(direct)';
+      document.getElementById('reason').textContent = r;
+      document.getElementById('when').textContent = new Date().toLocaleString();
+    })();
+  </script>
+</body>
+</html>

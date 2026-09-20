@@ -1,0 +1,21 @@
+# CHPC — run locally:
+#   docker compose up --build
+# Console:  http://localhost:4100
+# API:      http://localhost:4100/api
+services:
+  chpc:
+    build: .
+    image: chpc:latest
+    container_name: chpc
+    ports:
+      - "4100:4100"
+    environment:
+      CHPC_TZ: ${CHPC_TZ:-Europe/London}
+      # CHPC_GUARDIAN_PIN: ...   # future — see LLD §8
+    volumes:
+      - chpc-data:/data
+    restart: unless-stopped
+
+volumes:
+  chpc-data:
+    name: chpc-data

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CHPC Family</title>
+<style>
+  :root {
+    --paper: #f7f4ee;
+    --paper-2: #efeadd;
+    --ink: #22201c;
+    --ink-soft: #6b655b;
+    --brass: #a07c2c;
+    --brass-soft: #c9a860;
+    --ok: #4c7a4c;
+    --bad: #9c4a3c;
+    --corner: 3px;
+  }
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 320px;
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  header {
+    padding: 12px 14px 8px;
+  }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+  h1 { margin: 2px 0 0; font-size: 16px; font-weight: 600; }
+  .status {
+    margin: 0 14px;
+    padding: 8px 10px;
+    border: 1px solid var(--paper-2);
+    background: var(--paper-2);
+    border-radius: var(--corner);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-soft); flex: 0 0 auto; }
+  .dot.ok  { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  .dot.wait{ background: var(--brass-soft); }
+  section {
+    padding: 10px 14px;
+    border-top: 1px solid var(--paper-2);
+    margin-top: 10px;
+  }
+  label { display: block; margin-bottom: 8px; }
+  label span {
+    display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 3px;
+  }
+  input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    font: inherit;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    background: #fff;
+    border: 1px solid var(--paper-2);
+    border-radius: var(--corner);
+    color: var(--ink);
+  }
+  input[type="text"]:focus { outline: 2px solid var(--brass-soft); outline-offset: 1px; border-color: var(--brass-soft); }
+  button {
+    font: inherit;
+    padding: 7px 12px;
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: var(--corner);
+    cursor: pointer;
+  }
+  button.secondary { background: var(--paper-2); color: var(--ink); border-color: var(--paper-2); }
+  button:active { transform: translateY(1px); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .msg { margin-top: 8px; font-size: 12px; color: var(--ink-soft); min-height: 16px; }
+  .msg.err { color: var(--bad); }
+  footer {
+    padding: 8px 14px 12px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--ink-soft);
+    border-top: 1px solid var(--paper-2);
+    margin-top: 10px;
+  }
+  .kid { font-weight: 600; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="kicker">CHPC Family</div>
+    <h1 id="kid-name">Not paired yet</h1>
+  </header>
+
+  <div class="status">
+    <div>
+      <span id="status-text" class="kid">—</span>
+    </div>
+    <div class="dot wait" id="dot"></div>
+  </div>
+
+  <section id="pair-section">
+    <label>
+      <span>Pairing code</span>
+      <input type="text" id="pair-code" placeholder="e.g. abc-123" autocomplete="off" spellcheck="false">
+    </label>
+    <label>
+      <span>Console address</span>
+      <input type="text" id="api-base" placeholder="http://192.168.1.10:4100" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="row">
+      <button id="pair-btn">Pair &amp; connect</button>
+      <button id="unpair-btn" class="secondary" hidden>Forget</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section id="policy-section" hidden>
+    <label>
+      <span>Current policy</span>
+      <input type="text" id="policy-preview" readonly>
+    </label>
+    <button id="refresh-btn" class="secondary">Refresh policy now</button>
+  </section>
+
+  <footer id="foot">CHPC &middot; self-hosted &middot; v0.1.0</footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

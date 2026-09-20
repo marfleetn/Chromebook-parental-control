@@ -1,0 +1,29 @@
+{
+  "name": "@chpc/server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express + SQLite backend for Chromebook parental control. Serves the policy API, usage accounting, pairing and dashboard.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/"
+  },
+  "exports": {
+    "./app": "./src/app.js",
+    "./db": "./src/db.js",
+    "./status": "./src/status.js",
+    "./store": "./src/store.js",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@chpc/core": "*",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "supertest": "^7.2.2"
+  }
+}

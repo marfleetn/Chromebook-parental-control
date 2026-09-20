@@ -1,0 +1,30 @@
+{
+  "name": "chpc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted parental control for family Chromebooks: policy core, Express API + SQLite, React console, enforcing Chrome extension.",
+  "workspaces": [
+    "core",
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test core/test/*.mjs core/test/*.js server/test/*.js",
+    "build": "npm run build:web",
+    "build:web": "npm run build --workspace web",
+    "build:ext": "node scripts/build-ext.mjs",
+    "start": "npm start --workspace server",
+    "dev": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
+}

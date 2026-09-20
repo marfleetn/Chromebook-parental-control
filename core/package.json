@@ -1,0 +1,20 @@
+{
+  "name": "@chpc/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pure policy engine for Chromebook parental control. Zero runtime deps; shared by server and Chrome extension.",
+  "type": "module",
+  "main": "src/policy.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./policy": "./src/policy.js",
+    "./time": "./src/time.js",
+    "./site": "./src/site.js",
+    "./package.json": "./package.json",
+    "./rules": "./src/rules.js"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "license": "MIT"
+}
