@@ -1,5 +1,22 @@
 # Chromebook Parental Control (CHPC)
 
+[![Tests](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
+[![Security](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
+[![Extension](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/extension.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/extension.yml)
+[![Publish](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml)
+<br>
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Ftests.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
+[![runtime vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
+[![all-deps vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities-dev.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-security--and--quality-2ea44f?logo=github)](https://github.com/marfleetn/Chromebook-parental-control/security/code-scanning)
+<br>
+[![extension](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fextension.json&logo=googlechrome&logoColor=white)](extension/manifest.json)
+[![Manifest V3](https://img.shields.io/badge/Chrome%20extension-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![Chrome ≥ 116](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fmain%2Fextension%2Fmanifest.json&query=%24.minimum_chrome_version&label=Chrome&prefix=%E2%89%A5%20&color=4285F4&logo=googlechrome&logoColor=white)](extension/manifest.json)
+[![Node ≥ 22](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fmain%2Fpackage.json&query=%24.engines.node&label=Node&color=339933&logo=nodedotjs&logoColor=white)](package.json)
+[![Docker image](https://img.shields.io/badge/ghcr.io-chromebook--parental--control-2496ED?logo=docker&logoColor=white)](https://github.com/marfleetn/Chromebook-parental-control/pkgs/container/chromebook-parental-control)
+[![Licence: MIT](https://img.shields.io/github/license/marfleetn/Chromebook-parental-control)](LICENSE)
+
 Self-hosted parental control for family Chromebooks. A parent sets rules from a
 web console; a Chrome **extension enforces** them on each child's Chromebook and
 reports usage. No third-party cloud: the machine running this repo (a Raspberry
@@ -149,10 +166,18 @@ npm run audit:prod    # dependency advisories for the runtime tree
 npm run cli -- status # or reset-pin (CHPC_DB points at the database)
 ```
 
-CI (`.github/workflows/ci.yml`) runs the checks, tests, builds and a
-production audit on every push; `publish.yml` pushes the Docker image to
-`ghcr.io/marfleetn/chromebook-parental-control` on `main` and attaches an
-extension zip to each `v*` release.
+### Continuous integration and badges
+
+| Workflow | What it proves | Badge data |
+| -------- | -------------- | ---------- |
+| **Tests** (`ci.yml`) | syntax check, 66 unit + integration tests, console and extension builds, bundle freshness, Docker build | after a green run on `main`, regenerates `tests.json`, `vulnerabilities*.json` and `extension.json` on the `badges` branch via `npm run badges` |
+| **Security** (`security.yml`) | `npm audit` (fails on any runtime advisory), CodeQL static analysis; also weekly | code-scanning alerts under the repository's Security tab |
+| **Extension** (`extension.yml`) | Manifest V3 sanity, no inline scripts, then the extension **and** console run end to end in a real Chromium | — |
+| **Publish** (`publish.yml`) | multi-arch image to `ghcr.io/marfleetn/chromebook-parental-control` on `main`; extension zip on `v*` releases | — |
+
+Dependabot (`.github/dependabot.yml`) opens weekly PRs for npm, GitHub Actions
+and the base image. Static badges (Manifest V3, Chrome ≥ 116, Node ≥ 22) read
+the values straight from `extension/manifest.json` and `package.json`.
 
 ## Licence
 
