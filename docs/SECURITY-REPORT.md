@@ -170,6 +170,15 @@ Tests: 66 unit/integration (was 61); console e2e now exercises the setup screen 
 
 Tests: 69.
 
+### Dependabot follow-up (2026-09-21)
+
+Dependabot opened separate PRs for `react` and `react-dom`; the React-only bump
+failed the console e2e because React 19 refuses to run against react-dom 18.
+Resolved by moving the console to React 19 (both packages) and grouping the pair
+in `dependabot.yml`. The server moved to Express 5.2 (path-to-regexp v8, no
+regex-based route parsing) after the full suite and both browser checks passed.
+Docker base-image major bumps for Node are ignored so the image stays on LTS.
+
 ## 10. How to re-verify
 
 ```bash

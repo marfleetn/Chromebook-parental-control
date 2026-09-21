@@ -50,7 +50,7 @@ or a Docker host) is the single source of truth.
                                │ same-origin JSON /api, X-Guardian-PIN
                 ┌──────────────▼──────────────┐
                 │        CHPC Server          │
-                │  Express 4 + node:sqlite    │
+                │  Express 5 + node:sqlite    │
                 │  - guardian PIN auth        │
                 │  - policy CRUD, validation  │
                 │  - device pairing (codes)   │
@@ -72,8 +72,8 @@ or a Docker host) is the single source of truth.
 | Component  | Package        | Role |
 | ---------- | -------------- | ---- |
 | Policy core | `@chpc/core`  | Pure functions, no I/O, no clock: `decide()` scores one navigation; `buildDnrRules()` maps (policy, now, tz) to Chrome declarativeNetRequest rules; time and hostname helpers. Shared by server **and** extension (bundled by esbuild into `extension/vendor/core.js`). |
-| Server     | `@chpc/server` | Express 4 API, SQLite persistence, guardian PIN middleware, rate limiting, strict input validation, usage retention, static console serving. |
-| Console    | `@chpc/web`    | React 18 + Vite 7 single-page app: PIN gate, kids, policy editor, devices/pairing, usage. |
+| Server     | `@chpc/server` | Express 5 API, SQLite persistence, guardian PIN middleware, rate limiting, strict input validation, usage retention, static console serving. |
+| Console    | `@chpc/web`    | React 19 + Vite 7 single-page app: PIN gate, kids, policy editor, devices/pairing, usage. |
 | Extension  | `extension/`   | Chrome Manifest V3: module service worker applies rules every minute, meters the focused tab, reports usage, popup for pairing/status, lock page. |
 | Packaging  | root scripts, Docker | One-command test/build; multi-stage image; compose file. CI workflow runs tests, builds and a production dependency audit. |
 

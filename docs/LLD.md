@@ -27,7 +27,7 @@ chpc/
 │   │   ├── site.js            getHost(), ruleMatchesHost(), isLocalHost()
 │   │   └── time.js            parseHM(), fmtHM(), localClock(), inWindow(), dayAllowed(), isOffDay()
 │   └── test/                  policy.test.js · rules.test.mjs
-├── server/                    @chpc/server — Express 4 + node:sqlite
+├── server/                    @chpc/server — Express 5 + node:sqlite
 │   ├── src/
 │   │   ├── index.js           process entry: env → createApp(); prints the setup code; refuses unsafe config
 │   │   ├── app.js             createApp(opts) → { app, db, purge, getSetupCode, needsSetup }; all routes
@@ -38,7 +38,7 @@ chpc/
 │   │   ├── status.js          dayStartMs(), effectivePolicyForKid(), kidStatus()
 │   │   └── store.js           facade re-export of db.js
 │   └── test/api.test.js
-├── web/                       @chpc/web — React 18 + Vite 7 console
+├── web/                       @chpc/web — React 19 + Vite 7 console
 │   ├── vite.config.js         dev port 5173, proxy /api → 127.0.0.1:4100, outDir dist
 │   └── src/
 │       ├── main.jsx           createRoot + StrictMode
