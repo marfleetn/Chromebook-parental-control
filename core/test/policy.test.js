@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decide, inWindow, parseHM, remainingDaily } from '../src/policy.js';
-import { getHost, ruleMatchesHost } from '../src/site.js';
+import { getHost, ruleMatchesHost, stripStars } from '../src/site.js';
 
 // Fixed "now": 2026-09-18 (a Friday) 21:30 in Europe/London.
 const LONDON_2130 = Date.parse('2026-09-18T21:30:00Z'); // 22:30 BST local
@@ -108,4 +108,18 @@ test('getHost + ruleMatchesHost', () => {
   assert.ok(!ruleMatchesHost('example.com', 'notexample.com'));
   assert.ok(ruleMatchesHost('*.example.com', 'a.example.com'));
   assert.ok(ruleMatchesHost('*', 'anything.example'));
+});
+
+test('stripStars removes glob stars in linear time, no regex', () => {
+  assert.equal(stripStars('youtube.com'), 'youtube.com');
+  assert.equal(stripStars('*.example.com'), 'example.com');
+  assert.equal(stripStars('tiktok.com*'), 'tiktok.com');
+  assert.equal(stripStars('**.a.b**'), 'a.b');
+  assert.equal(stripStars('.a.b'), '.a.b', 'a dot without leading stars is kept');
+  assert.equal(stripStars('*'), '');
+  assert.equal(stripStars(''), '');
+  const hostile = '*'.repeat(200000) + '.' + '*'.repeat(200000);
+  const t0 = Date.now();
+  assert.equal(stripStars(hostile), '');
+  assert.ok(Date.now() - t0 < 200, 'hostile input handled quickly');
 });

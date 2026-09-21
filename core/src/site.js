@@ -84,3 +84,19 @@ export function ruleMatchesHost(pattern, host) {
   // Bare domain (no leading dot) -> match itself + any subdomain.
   return h.endsWith('.' + p);
 }
+
+/**
+ * Strip glob stars from a site pattern without regular expressions (linear
+ * time, safe on untrusted input): trailing `*`s, then leading `*`s and the
+ * single `.` that may follow them. "*.example.com*" -> "example.com".
+ */
+export function stripStars(pattern) {
+  const p = String(pattern);
+  let start = 0;
+  let end = p.length;
+  while (end > start && p.charCodeAt(end - 1) === 42) end--;        // '*'
+  const hadLeading = start < end && p.charCodeAt(start) === 42;
+  while (start < end && p.charCodeAt(start) === 42) start++;
+  if (hadLeading && start < end && p.charCodeAt(start) === 46) start++; // '.'
+  return p.slice(start, end);
+}

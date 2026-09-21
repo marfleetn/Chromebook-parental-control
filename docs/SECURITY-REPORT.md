@@ -159,6 +159,17 @@ weakening the model above:
 
 Tests: 66 unit/integration (was 61); console e2e now exercises the setup screen end to end.
 
+### CodeQL findings on the first merge to `main` (fixed)
+
+| Finding | Fix |
+| ------- | --- |
+| Polynomial regex on untrusted input: the `*`-stripping patterns in `core/src/rules.js` (and the same expression in `server/src/validate.js` and the extension worker) | Replaced with `stripStars()` in `core/src/site.js`: a linear character scan, shared by all three call sites; tested against a 400 000-character hostile string. |
+| Polynomial regex on the `Authorization: Bearer` header | Header parsed by prefix/slice with a 512-character cap; no regex. |
+| Missing request rate limiting ahead of the PIN check | Blanket per-client throttle on every `/api` route (300 requests/min by default, `requestLimit` option), in addition to the existing failure-based lockouts. |
+| Incomplete URL substring sanitisation in the console e2e script | False positive on `Array.includes`; changed to an exact-match `some()` so the scanner and readers agree. |
+
+Tests: 69.
+
 ## 10. How to re-verify
 
 ```bash

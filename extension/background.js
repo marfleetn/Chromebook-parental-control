@@ -21,7 +21,7 @@
  *  - Chrome rejects the rule set -> retry in the simpler rule flavour, then
  *    fall back to the fail-closed set. A broken rule set never means "open".
  */
-import { buildDnrRules, failClosedRules, minimalBlockRules, globalBlockCode, LOCK_PAGE } from './vendor/core.js';
+import { buildDnrRules, failClosedRules, minimalBlockRules, globalBlockCode, stripStars, LOCK_PAGE } from './vendor/core.js';
 
 const ALARM_TICK = 'chpc-tick';
 const OFFLINE_MS = 10 * 60 * 1000;
@@ -122,7 +122,7 @@ function withLocalUsage(policy, pending) {
   if (Array.isArray(p.siteBudgets)) {
     p.siteBudgets = p.siteBudgets.map((sb) => {
       if (!sb || typeof sb.pattern !== 'string') return sb;
-      const pat = sb.pattern.toLowerCase().replace(/\*+$/, '').replace(/^\*+\.?/, '');
+      const pat = stripStars(sb.pattern.toLowerCase());
       const extra = hosts.filter(([h]) => h === pat || h.endsWith('.' + pat)).reduce((a, [, sec]) => a + Number(sec), 0) / 60;
       return extra ? { ...sb, used: (Number(sb.used) || 0) + extra } : sb;
     });

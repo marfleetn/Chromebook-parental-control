@@ -58,6 +58,24 @@ export class RateLimiter {
   }
 }
 
+/**
+ * Plain per-client request throttle for a route group: counts every request
+ * (not just failures) in a sliding window and answers 429 past `limit`.
+ * Generous by default (300/min) — the console polls a few times a minute.
+ */
+export function makeRequestLimiter({ limit = 300, windowMs = 60 * 1000, now = Date.now } = {}) {
+  const rl = new RateLimiter({ limit, windowMs, now });
+  return function requestLimiter(req, res, next) {
+    const key = req.ip || 'unknown';
+    if (rl.blocked(key)) {
+      res.set('Retry-After', String(Math.ceil(windowMs / 1000)));
+      return res.status(429).json({ error: 'too many requests — slow down', code: 'rate-limited' });
+    }
+    rl.fail(key); // count this request
+    next();
+  };
+}
+
 /** Validate a PIN chosen by the operator. Returns an error string or null. */
 export function pinProblem(pin) {
   if (typeof pin !== 'string' || !pin) return 'the PIN is empty';
@@ -99,9 +117,13 @@ export function pinFromRequest(req) {
   const h = req.get('x-guardian-pin');
   if (typeof h === 'string' && h) return h;
   const auth = req.get('authorization');
-  if (typeof auth === 'string') {
-    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
-    if (m) return m[1];
+  if (typeof auth === 'string' && auth.length <= 512) {
+    // "Bearer <token>" parsed without a regex (linear time on hostile input).
+    const t = auth.trim();
+    if (t.length > 7 && t.slice(0, 7).toLowerCase() === 'bearer ') {
+      const token = t.slice(7).trim();
+      if (token) return token;
+    }
   }
   return null;
 }
