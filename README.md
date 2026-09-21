@@ -53,7 +53,7 @@ from the console. Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 | Path          | What it is                                                                          |
 | ------------- | ----------------------------------------------------------------------------------- |
 | `core/`       | Pure policy engine: `decide()` for verdicts, `buildDnrRules()` for Chrome rules. No deps. |
-| `server/`     | Express 4 + `node:sqlite` API: guardian PIN auth, first-run setup, kids, policies, pairing, usage. |
+| `server/`     | Express 5 + `node:sqlite` API: guardian PIN auth, first-run setup, kids, policies, pairing, usage. |
 | `web/`        | React + Vite parent console (served by the server).                                  |
 | `extension/`  | Chrome Manifest V3 extension: applies the policy with declarativeNetRequest, meters usage. |
 | `install.sh`  | One-line installer (systemd service, `chpc` helper).                                 |

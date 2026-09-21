@@ -10,3 +10,4 @@ __pycache__/
 data/
 .env.*
 !.env.example
+e2e-artifacts/

@@ -47,7 +47,9 @@ const server = spawn(process.execPath, ['server/src/index.js'], {
   env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', CHPC_GUARDIAN_PIN: PIN, CHPC_DB: path.join(dataDir, 'chpc.db'), CHPC_PUBLIC_DIR: path.join(root, 'web/dist') },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
-server.stderr.on('data', (d) => process.stderr.write('[server] ' + d));
+let serverLog = '';
+server.stdout.on('data', (d) => { serverLog += d; });
+server.stderr.on('data', (d) => { serverLog += d; process.stderr.write('[server] ' + d); });
 for (let i = 0; i < 50; i++) {
   try { const r = await fetch(base + '/api/health'); if (r.ok) break; } catch { /* not yet */ }
   await sleep(100);
@@ -67,6 +69,7 @@ const context = await playwright.chromium.launchPersistentContext(userDataDir, {
   args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
 });
 let exitCode = 0;
+const artDir = path.join(root, 'e2e-artifacts');
 try {
   let [sw] = context.serviceWorkers();
   if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 15000 });
@@ -154,6 +157,22 @@ try {
 } catch (e) {
   exitCode = 1;
   console.error('\n' + (e && e.stack || e));
+  try {
+    fs.mkdirSync(artDir, { recursive: true });
+    let i = 0;
+    for (const pg of context.pages()) {
+      console.error(`--- page ${i} url: ${pg.url()}`);
+      await pg.screenshot({ path: path.join(artDir, `extension-page-${i}.png`) }).catch(() => {});
+      i++;
+    }
+    const sws = context.serviceWorkers();
+    if (sws[0]) {
+      const st = await sws[0].evaluate(() => chrome.storage.local.get(null)).catch((x) => ({ error: String(x) }));
+      console.error('--- extension storage: ' + JSON.stringify(st).slice(0, 2000));
+    }
+    console.error('--- server log:\n' + serverLog.slice(-3000));
+    fs.writeFileSync(path.join(artDir, 'extension-server.log'), serverLog);
+  } catch (d) { console.error('diagnostics failed: ' + d); }
 } finally {
   await context.close().catch(() => {});
   server.kill('SIGTERM');
