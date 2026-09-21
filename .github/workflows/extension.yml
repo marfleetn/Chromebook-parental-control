@@ -38,3 +38,10 @@ jobs:
         run: npm run e2e:ext
       - name: Console end-to-end (real Chromium)
         run: npm run e2e:web
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: e2e-artifacts/
+          if-no-files-found: ignore

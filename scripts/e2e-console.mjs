@@ -30,19 +30,42 @@ const server = spawn(process.execPath, ['server/src/index.js'], {
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let stdout = '';
+let stderr = '';
 server.stdout.on('data', (d) => { stdout += d; });
+server.stderr.on('data', (d) => { stderr += d; });
 for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/api/health')).ok) break; } catch {} await sleep(100); }
 await sleep(300);
 const setupCode = (/Setup code:\s+([A-Z]{4}-[A-Z]{4})/.exec(stdout) || [])[1];
 check(!!setupCode, 'server printed a one-time setup code: ' + setupCode);
 check(fs.readFileSync(path.join(dataDir, 'setup-code.txt'), 'utf8').trim() === setupCode.replace('-', ''), 'setup code also written next to the database');
 
+// Pre-flight: the console must be served with its assets before we involve a browser.
+{
+  const idx = await fetch(base + '/');
+  const html = await idx.text();
+  check(idx.status === 200 && /<div id="root">/.test(html), `GET / -> ${idx.status}, console index served`);
+  const srcs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+  check(srcs.length > 0, 'index.html references built assets: ' + srcs.join(', '));
+  for (const a of srcs) {
+    const r = await fetch(base + a);
+    check(r.status === 200, `asset ${a} -> ${r.status} ${r.headers.get('content-type')}`);
+  }
+  const st = await fetch(base + '/api/settings');
+  check(st.status === 503 && (await st.json()).code === 'setup-required', 'API reports setup-required before the browser opens');
+}
+
 const browser = await playwright.chromium.launch({ headless: true });
+const artDir = path.join(root, 'e2e-artifacts');
 let exitCode = 0;
+let page;
+const consoleLog = [];
 try {
-  const page = await browser.newPage();
+  page = await browser.newPage();
   const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('pageerror', (e) => { errors.push(String(e)); consoleLog.push('[pageerror] ' + e); });
+  page.on('console', (m) => consoleLog.push(`[${m.type()}] ${m.text()}`));
+  page.on('requestfailed', (r) => consoleLog.push(`[requestfailed] ${r.url()} ${r.failure()?.errorText}`));
+  page.on('response', (r) => { if (r.status() >= 400) consoleLog.push(`[http ${r.status()}] ${r.url()}`); });
   // 401s (PIN gate, deliberate wrong PIN) and 503s (setup-required probe) are expected responses.
   page.on('console', (m) => { if (m.type() === 'error' && !/status of (401|503)/.test(m.text())) errors.push(m.text()); });
 
@@ -122,6 +145,22 @@ try {
 } catch (e) {
   exitCode = 1;
   console.error('\n' + (e && e.stack || e));
+  // Diagnostics: what did the browser actually see?
+  try {
+    fs.mkdirSync(artDir, { recursive: true });
+    if (page) {
+      console.error('\n--- page url: ' + page.url());
+      const body = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 3000) : '(no body)').catch((x) => 'evaluate failed: ' + x);
+      console.error('--- page text:\n' + body);
+      await page.screenshot({ path: path.join(artDir, 'console-failure.png'), fullPage: true }).catch(() => {});
+      fs.writeFileSync(path.join(artDir, 'console-page.html'), await page.content().catch(() => ''));
+    }
+    console.error('--- browser console (' + consoleLog.length + '):\n' + consoleLog.slice(-60).join('\n'));
+    console.error('--- server stdout:\n' + stdout.slice(-3000));
+    console.error('--- server stderr:\n' + stderr.slice(-3000));
+    fs.writeFileSync(path.join(artDir, 'console-browser.log'), consoleLog.join('\n'));
+    fs.writeFileSync(path.join(artDir, 'console-server.log'), stdout + '\n' + stderr);
+  } catch (d) { console.error('diagnostics failed: ' + d); }
 } finally {
   await browser.close().catch(() => {});
   server.kill('SIGTERM');
