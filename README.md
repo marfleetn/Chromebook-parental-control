@@ -6,6 +6,7 @@
 [![Publish](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml)
 <br>
 [![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Ftests.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fcoverage.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
 [![runtime vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
 [![all-deps vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities-dev.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-security--and--quality-2ea44f?logo=github)](https://github.com/marfleetn/Chromebook-parental-control/security/code-scanning)
@@ -68,7 +69,7 @@ from the console. Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ```bash
 npm install
-npm test                    # 66 unit + integration tests
+npm test                    # 74 unit + integration tests (npm run test:coverage adds thresholds)
 npm run build               # console -> web/dist, extension bundle -> extension/vendor/core.js
 CHPC_PUBLIC_DIR=web/dist npm start
 ```
@@ -158,7 +159,10 @@ See [docs/SECURITY-REPORT.md](docs/SECURITY-REPORT.md) for the full assessment.
 ## Development
 
 ```bash
-npm test              # 66 tests across core and server
+npm test              # 74 tests across core and server
+npm run test:coverage # same, failing under 95% lines / 80% branches / 95% functions
+npm run lint          # ESLint (server, core, extension, console)
+npm run ci            # everything a pull request must pass, locally
 npm run check         # syntax-check every JS file
 npm run build:ext     # rebuild extension/vendor/core.js after touching core/
 npm run dev           # API with --watch; console dev server: npm run dev:web (proxies /api)
@@ -168,16 +172,34 @@ npm run cli -- status # or reset-pin (CHPC_DB points at the database)
 
 ### Continuous integration and badges
 
-| Workflow | What it proves | Badge data |
-| -------- | -------------- | ---------- |
-| **Tests** (`ci.yml`) | syntax check, 66 unit + integration tests, console and extension builds, bundle freshness, Docker build | after a green run on `main`, regenerates `tests.json`, `vulnerabilities*.json` and `extension.json` on the `badges` branch via `npm run badges` |
-| **Security** (`security.yml`) | `npm audit` (fails on any runtime advisory), CodeQL static analysis; also weekly | code-scanning alerts under the repository's Security tab |
-| **Extension** (`extension.yml`) | Manifest V3 sanity, no inline scripts, then the extension **and** console run end to end in a real Chromium | — |
-| **Publish** (`publish.yml`) | multi-arch image to `ghcr.io/marfleetn/chromebook-parental-control` on `main`; extension zip on `v*` releases | — |
+Every pull request and every push runs four workflows. The badge row at the top
+reads from `main`; the numbers (tests, coverage, vulnerabilities, extension
+version) are regenerated on the `badges` branch after each green run on `main`.
 
-Dependabot (`.github/dependabot.yml`) opens weekly PRs for npm, GitHub Actions
-and the base image. Static badges (Manifest V3, Chrome ≥ 116, Node ≥ 22) read
-the values straight from `extension/manifest.json` and `package.json`.
+| Workflow | Jobs (these are the check names) | What it proves |
+| -------- | -------------------------------- | -------------- |
+| **Tests** (`ci.yml`) | `lint`, `test (22)`, `test (24)`, `docker`, `badges` (main only) | ESLint; 74 unit + integration tests on Node 22 and 24 with coverage thresholds (95% lines, 80% branches, 95% functions); console and extension builds; committed extension bundle is current; Docker image builds, starts, prints a setup code and answers `/api/health` |
+| **Security** (`security.yml`) | `audit`, `codeql` | `npm audit` fails on any runtime advisory; CodeQL security-and-quality analysis; also weekly |
+| **Extension** (`extension.yml`) | `manifest`, `e2e-chromium` | Manifest V3 sanity, no inline scripts; the extension **and** the console driven end to end in a real Chromium, with screenshots and logs uploaded on failure |
+| **Publish** (`publish.yml`) | `image`, `extension` | multi-arch image to `ghcr.io/marfleetn/chromebook-parental-control` on `main`; extension zip on `v*` releases |
+
+Run the same gate locally before pushing: `npm run ci` (plus `npm run e2e:ext`
+and `npm run e2e:web` if you have Playwright).
+
+**Making the checks mandatory.** Workflows report; only a branch ruleset blocks a
+merge. Once, as the repository owner: *Settings → Rules → Rulesets → New branch
+ruleset*; target `main`; enable **Require a pull request before merging**,
+**Require status checks to pass** with *Require branches to be up to date*, and
+add the checks `lint`, `test (22)`, `test (24)`, `docker`, `audit`, `codeql`,
+`manifest`, `e2e-chromium`; enable **Block force pushes** and **Restrict
+deletions**; set enforcement to *Active*. From then on the Merge button stays
+disabled until every check is green. Dependabot's grouped PRs go through the
+same gate.
+
+Dependabot (`.github/dependabot.yml`) opens weekly PRs for npm (React pair and
+dev toolchain grouped), GitHub Actions (grouped) and the base image (LTS only).
+`.github/pull_request_template.md` gives every PR the same test and security
+checklist.
 
 ## Licence
 

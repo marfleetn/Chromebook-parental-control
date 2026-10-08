@@ -160,7 +160,6 @@ function pad(hm) {
 /** Child name: trimmed, 1..60 chars, no control characters. */
 export function validateName(raw) {
   if (typeof raw !== 'string') return bad('name is required', 'name');
-  // eslint-disable-next-line no-control-regex
   const name = raw.replace(/[\u0000-\u001f\u007f]/g, '').trim();
   if (!name) return bad('name is required', 'name');
   if (name.length > LIMITS.name) return bad(`name may be at most ${LIMITS.name} characters`, 'name');
@@ -171,7 +170,6 @@ export function validateName(raw) {
 export function validateAgentId(raw) {
   if (raw === undefined || raw === null || raw === '') return { agentId: 'device' };
   if (typeof raw !== 'string') return bad('agentId must be a string', 'agentId');
-  // eslint-disable-next-line no-control-regex
   const a = raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, LIMITS.agentId);
   return { agentId: a || 'device' };
 }

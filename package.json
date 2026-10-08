@@ -24,10 +24,17 @@
     "e2e:ext": "node scripts/e2e-extension.mjs",
     "e2e:web": "node scripts/e2e-console.mjs",
     "cli": "node server/src/cli.js",
-    "badges": "node scripts/badges.mjs"
+    "badges": "node scripts/badges.mjs",
+    "lint": "eslint .",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='core/src/**' --test-coverage-include='server/src/**' --test-coverage-lines=95 --test-coverage-branches=80 --test-coverage-functions=95 core/test/*.mjs core/test/*.js server/test/*.js",
+    "ci": "npm run check && npm run lint && npm run test:coverage && npm run build"
   },
   "license": "MIT",
   "devDependencies": {
-    "esbuild": "^0.25.12"
+    "@eslint/js": "^9.39.5",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.13.0"
   }
 }

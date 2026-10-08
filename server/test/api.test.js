@@ -8,7 +8,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { RateLimiter, pinProblem, hashPin, verifyPinHash } from '../src/auth.js';
 import { validatePolicy, normalizePattern } from '../src/validate.js';
-import { makeCode, normalizeCode, formatCode, openDb, addUsage, purgeUsageOlderThan, createKid } from '../src/db.js';
+import { makeCode, normalizeCode, formatCode, openDb, addUsage, purgeUsageOlderThan, createKid, getKid, usageTotalBetween, getSetting } from '../src/db.js';
 
 const PIN = 'family-2026';
 const CODE_RE = /^[BCDFGHJKLMNPQRSTVWXZ]{8}$/;
@@ -596,4 +596,20 @@ test('serves the console and falls back to index.html for non-API paths', async 
   assert.match((await anon.get('/kids/1').set('Accept', 'text/html')).text, /console/);
   assert.equal((await anon.get('/api/nope')).status, 404);
   assert.equal((await anon.get('/api')).status, 404);
+});
+
+test('db helpers: bad ids, totals between instants, settings fallback', () => {
+  const db = openDb(':memory:');
+  assert.equal(getKid(db, 'x'), undefined);
+  assert.equal(getKid(db, 0), undefined);
+  assert.equal(getKid(db, 1.5), undefined);
+  const kid = createKid(db, 'T');
+  addUsage(db, { kidId: kid.id, site: 'a.com', seconds: 60 });
+  const now = Date.now();
+  assert.deepEqual(usageTotalBetween(db, kid.id, now - 60000, now + 60000), { seconds: 60, visits: 1 });
+  assert.deepEqual(usageTotalBetween(db, kid.id, now + 60000, now + 120000), { seconds: 0, visits: 0 });
+  assert.equal(getSetting(db, 'nope', 'fallback'), 'fallback');
+  db.prepare("INSERT INTO settings (key, json) VALUES ('broken', '{not json')").run();
+  assert.equal(getSetting(db, 'broken', 'fb'), 'fb', 'corrupt JSON falls back');
+  db.close();
 });

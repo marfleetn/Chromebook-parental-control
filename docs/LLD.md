@@ -141,7 +141,7 @@ all + local allows; `minimalBlockRules()` = one block-all rule (last resort).
 
 ### 2.5 Tests
 
-`core/test/policy.test.js` (13): parsing, windows, each decision code, local
+`core/test/policy.test.js` (17: incl. offline usage fold, DST, helpers): parsing, windows, each decision code, local
 bypass, non-web schemes. `core/test/rules.test.mjs` (24): Chrome schema
 assertions on every rule set, both flavours, each priority band, time
 evaluation at fixed instants, boundary safety, junk tolerance, regex size.
@@ -245,7 +245,7 @@ for non-API GETs that accept HTML.
 | `CHPC_CORS_ORIGINS` | none | comma-separated allowed origins |
 | `CHPC_TRUST_PROXY` | off | `1` behind a reverse proxy |
 
-### 3.6 Tests (`server/test/api.test.js`, 29)
+### 3.6 Tests (`server/test/api.test.js`, 32)
 
 Auth (401/429/503, Bearer), first-run setup (code file, wrong/weak/right,
 single use, restart pickup, rate limit), PIN change (db vs env), scrypt
@@ -321,8 +321,11 @@ the host, falls back to `CHPC_WHY`, has a Go back button.
   (0700, user `chpc`), settings in `/etc/chpc/chpc.env` (0600), hardened
   systemd unit, `/usr/local/bin/chpc` helper; prints URL, QR (if `qrencode`)
   and the setup code. Idempotent: re-running upgrades in place.
-- `.github/workflows/ci.yml` — Node 22: `npm ci`, `check`, `test`, `build`,
-  bundle freshness, `npm audit --omit=dev`, Docker build.
+- `.github/workflows/ci.yml` — `lint` (ESLint), `test` on Node 22 and 24 with
+  coverage thresholds (`npm run test:coverage`), builds, bundle freshness,
+  `docker` (build + start + health + setup code), `badges` on main.
+- `eslint.config.mjs` — flat config: recommended rules, React JSX-usage rules,
+  Node / browser / extension globals per directory.
 - `.github/workflows/publish.yml` — multi-arch image to GHCR on `main` and
   `v*` tags; extension zip attached to `v*` releases.
 - Root scripts: `test`, `check`, `build`, `build:web`, `build:ext`, `start`,

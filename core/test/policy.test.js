@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, inWindow, parseHM, remainingDaily } from '../src/policy.js';
+import { decide, inWindow, parseHM, remainingDaily, applyPendingUsage, internetOn } from '../src/policy.js';
+import { localClock, fmtHM, dayAllowed, isOffDay } from '../src/time.js';
 import { getHost, ruleMatchesHost, stripStars } from '../src/site.js';
 
 // Fixed "now": 2026-09-18 (a Friday) 21:30 in Europe/London.
@@ -122,4 +123,58 @@ test('stripStars removes glob stars in linear time, no regex', () => {
   const t0 = Date.now();
   assert.equal(stripStars(hostile), '');
   assert.ok(Date.now() - t0 < 200, 'hostile input handled quickly');
+});
+
+test('applyPendingUsage folds offline minutes into daily and per-site budgets', () => {
+  const policy = { dailyMinutes: 60, usageToday: 10, siteBudgets: [{ pattern: 'youtube.com', minutes: 30, used: 5 }, { pattern: 'bbc.co.uk', minutes: 30 }] };
+  const out = applyPendingUsage(policy, { 'm.youtube.com': 600, 'news.bbc.co.uk': 60, 'other.com': 60, junk: -5, '': 99 });
+  assert.equal(out.usageToday, 22, '10 + 12 minutes');
+  assert.equal(out.siteBudgets[0].used, 15, 'youtube subdomain counts toward the youtube budget');
+  assert.equal(out.siteBudgets[1].used, 1);
+  assert.equal(policy.usageToday, 10, 'input not mutated');
+  assert.equal(policy.siteBudgets[0].used, 5);
+  // Offline budget exhaustion is visible to decide()
+  const now = LONDON_1900, tz = 'Europe/London';
+  assert.equal(decide(applyPendingUsage({ dailyMinutes: 60, usageToday: 59 }, { 'x.com': 120 }), 'https://x.com', { now, tz }).code, 'daily-budget');
+  assert.deepEqual(applyPendingUsage({ a: 1 }, null), { a: 1 });
+  assert.deepEqual(applyPendingUsage({ a: 1 }, {}), { a: 1 });
+  assert.equal(applyPendingUsage(null, { 'x.com': 60 }), null);
+});
+
+test('internetOn / fmtHM / dayAllowed / isOffDay helpers', () => {
+  assert.equal(internetOn({}), true);
+  assert.equal(internetOn({ internetAllowed: false }), false);
+  assert.equal(fmtHM(0), '00:00');
+  assert.equal(fmtHM(1439), '23:59');
+  assert.equal(fmtHM(1500), '01:00', 'wraps past midnight');
+  assert.equal(fmtHM(-60), '23:00', 'negative wraps backwards');
+  assert.equal(dayAllowed(0, undefined), true);
+  assert.equal(dayAllowed(0, ['Sun']), true);
+  assert.equal(dayAllowed(1, ['Sun']), false);
+  assert.equal(isOffDay('2026-09-19', 'not-an-array'), false);
+});
+
+test('localClock handles the Europe/London DST change (25 Oct 2026, clocks go back)', () => {
+  // 00:30 UTC on 25 Oct = 01:30 BST (still summer time)
+  const before = localClock(Date.parse('2026-10-25T00:30:00Z'), 'Europe/London');
+  assert.equal(before.hour, 1); assert.equal(before.min, 30); assert.equal(before.date, '2026-10-25'); assert.equal(before.dow, 0);
+  // 01:30 UTC on 25 Oct = 01:30 GMT (the repeated hour)
+  const after = localClock(Date.parse('2026-10-25T01:30:00Z'), 'Europe/London');
+  assert.equal(after.hour, 1); assert.equal(after.min, 30);
+  // A window 20:00-07:00 still covers both instants
+  const p = { windows: [{ start: '20:00', end: '07:00' }] };
+  for (const ms of [Date.parse('2026-10-25T00:30:00Z'), Date.parse('2026-10-25T01:30:00Z'), Date.parse('2026-10-25T06:59:00Z')]) {
+    assert.equal(decide(p, 'https://x.com', { now: ms, tz: 'Europe/London' }).allowed, true, new Date(ms).toISOString());
+  }
+  // 07:00 GMT = 07:00 UTC -> outside
+  assert.equal(decide(p, 'https://x.com', { now: Date.parse('2026-10-25T07:00:00Z'), tz: 'Europe/London' }).code, 'off-hours');
+  // Day boundary follows the zone, not UTC: 23:30 UTC on 24 Oct is already 00:30 on 25 Oct in London
+  assert.equal(localClock(Date.parse('2026-10-24T23:30:00Z'), 'Europe/London').date, '2026-10-25');
+  assert.equal(localClock(Date.parse('2026-10-24T23:30:00Z'), 'UTC').date, '2026-10-24');
+});
+
+test('decide: windows with junk entries and non-array days do not crash', () => {
+  const p = { windows: [null, 'x', { days: 'Mon', start: '08:00', end: '09:00' }, { start: 'bad' }] };
+  const r = decide(p, 'https://x.com', { now: LONDON_1900, tz: 'Europe/London' });
+  assert.ok(['ok', 'off-hours'].includes(r.code));
 });

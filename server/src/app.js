@@ -399,7 +399,6 @@ export function createApp(opts = {}) {
   }
 
   app.use((req, res) => err(res, 404, 'not found'));
-  // eslint-disable-next-line no-unused-vars
   app.use((e, req, res, _next) => {
     const status = e.status || e.statusCode || 500;
     if (status >= 500) log('[chpc-server]', e);

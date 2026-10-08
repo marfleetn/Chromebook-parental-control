@@ -8,6 +8,9 @@ on:
   pull_request:
   schedule:
     - cron: "17 6 * * 1"
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
   security-events: write

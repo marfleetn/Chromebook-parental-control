@@ -33,6 +33,20 @@ if (!pass && !fail) write('tests.json', 'tests', 'unknown', 'lightgrey');
 else if (fail) write('tests.json', 'tests', `${fail} failing / ${pass + fail}`, 'red');
 else write('tests.json', 'tests', `${pass} passing`, 'brightgreen');
 
+// ---- coverage (lines / branches / functions over core/src + server/src) -------
+const cov = spawnSync(process.execPath, ['--test', '--experimental-test-coverage',
+  '--test-coverage-include=core/src/**', '--test-coverage-include=server/src/**',
+  ...fs.globSync(['core/test/*.mjs', 'core/test/*.js', 'server/test/*.js'], { cwd: root })],
+  { cwd: root, encoding: 'utf8' });
+const covLine = /^# all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m.exec((cov.stdout || '') + (cov.stderr || ''));
+if (!covLine) write('coverage.json', 'coverage', 'unknown', 'lightgrey');
+else {
+  const [lines, branches, funcs] = covLine.slice(1, 4).map(Number);
+  const worst = Math.min(lines, branches, funcs);
+  write('coverage.json', 'coverage', `${lines.toFixed(0)}% lines · ${branches.toFixed(0)}% branches`,
+    worst >= 90 ? 'brightgreen' : worst >= 80 ? 'green' : worst >= 70 ? 'yellow' : 'orange');
+}
+
 // ---- vulnerabilities ---------------------------------------------------------
 function auditTotal(args) {
   const r = spawnSync('npm', ['audit', '--json', ...args], { cwd: root, encoding: 'utf8' });

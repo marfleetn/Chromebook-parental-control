@@ -150,3 +150,31 @@ export function remainingDaily(policy = {}) {
 export function internetOn(policy = {}) {
   return policy.internetAllowed !== false;
 }
+
+/**
+ * Fold not-yet-reported local usage into an effective policy so budgets keep
+ * counting while the device is offline. `pending` is {hostname: seconds}.
+ * Pure: returns a new policy; the input is not mutated. Used by the extension
+ * between successful flushes; the server never sees this intermediate state.
+ */
+export function applyPendingUsage(policy, pending) {
+  if (!policy || typeof policy !== 'object') return policy;
+  if (!pending || typeof pending !== 'object') return { ...policy };
+  const hosts = Object.entries(pending)
+    .map(([h, sec]) => [String(h).toLowerCase(), Number(sec)])
+    .filter(([h, sec]) => h && Number.isFinite(sec) && sec > 0);
+  const p = { ...policy };
+  if (!hosts.length) return p;
+  const totalMin = hosts.reduce((a, [, sec]) => a + sec, 0) / 60;
+  p.usageToday = (Number(p.usageToday) || 0) + totalMin;
+  if (Array.isArray(p.siteBudgets)) {
+    p.siteBudgets = p.siteBudgets.map((sb) => {
+      if (!sb || typeof sb !== 'object' || typeof sb.pattern !== 'string') return sb;
+      const extra = hosts
+        .filter(([h]) => ruleMatchesHost(sb.pattern, h))
+        .reduce((a, [, sec]) => a + sec, 0) / 60;
+      return extra ? { ...sb, used: (Number(sb.used) || 0) + extra } : { ...sb };
+    });
+  }
+  return p;
+}

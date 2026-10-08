@@ -21,7 +21,7 @@
  *  - Chrome rejects the rule set -> retry in the simpler rule flavour, then
  *    fall back to the fail-closed set. A broken rule set never means "open".
  */
-import { buildDnrRules, failClosedRules, minimalBlockRules, globalBlockCode, stripStars, LOCK_PAGE } from './vendor/core.js';
+import { buildDnrRules, failClosedRules, minimalBlockRules, globalBlockCode, applyPendingUsage, LOCK_PAGE } from './vendor/core.js';
 
 const ALARM_TICK = 'chpc-tick';
 const OFFLINE_MS = 10 * 60 * 1000;
@@ -109,25 +109,6 @@ async function meterActiveTab(seconds = 60) {
     pending[host] = Math.min(6 * 3600, (Number(pending[host]) || 0) + seconds);
     await put({ pendingUsage: pending });
   } catch { /* metering is best-effort */ }
-}
-
-/** Fold not-yet-reported local usage into the cached policy so budgets keep counting offline. */
-function withLocalUsage(policy, pending) {
-  if (!policy || typeof policy !== 'object' || !pending || typeof pending !== 'object') return policy;
-  const p = { ...policy };
-  const hosts = Object.entries(pending).filter(([, sec]) => Number(sec) > 0);
-  if (!hosts.length) return p;
-  const totalMin = hosts.reduce((a, [, sec]) => a + Number(sec), 0) / 60;
-  p.usageToday = (Number(p.usageToday) || 0) + totalMin;
-  if (Array.isArray(p.siteBudgets)) {
-    p.siteBudgets = p.siteBudgets.map((sb) => {
-      if (!sb || typeof sb.pattern !== 'string') return sb;
-      const pat = stripStars(sb.pattern.toLowerCase());
-      const extra = hosts.filter(([h]) => h === pat || h.endsWith('.' + pat)).reduce((a, [, sec]) => a + Number(sec), 0) / 60;
-      return extra ? { ...sb, used: (Number(sb.used) || 0) + extra } : sb;
-    });
-  }
-  return p;
 }
 
 // -------------------------------------------------------- DNR application --
@@ -219,7 +200,7 @@ function tick(opts = {}) {
       const n = age > OFFLINE_MS ? await applyFailClosed('no policy yet and the console is unreachable') : (s.ruleCount || 0);
       return { paired: true, online, rules: n, failClosed: age > OFFLINE_MS };
     }
-    const policy = online ? s.cachedPolicy : withLocalUsage(s.cachedPolicy, s.pendingUsage);
+    const policy = online ? s.cachedPolicy : applyPendingUsage(s.cachedPolicy, s.pendingUsage);
     let r;
     try { r = await applyPolicy(policy, s); }
     catch (e) { r = { rules: await applyFailClosed(String(e && e.message || e)).catch(() => 0), mode: 'fail-closed' }; }
