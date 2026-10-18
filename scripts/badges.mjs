@@ -24,7 +24,7 @@ const write = (name, label, message, color) => {
 
 // ---- tests -----------------------------------------------------------------
 const t = spawnSync(process.execPath, ['--test', '--test-reporter=tap',
-  ...fs.globSync ? fs.globSync(['core/test/*.mjs', 'core/test/*.js', 'server/test/*.js'], { cwd: root }) : []],
+  ...fs.globSync ? fs.globSync(['core/test/*.mjs', 'core/test/*.js', 'server/test/*.js', 'test/*.mjs'], { cwd: root }) : []],
   { cwd: root, encoding: 'utf8' });
 const tap = (t.stdout || '') + (t.stderr || '');
 const pass = Number(/^# pass (\d+)/m.exec(tap)?.[1] ?? 0);
@@ -33,10 +33,20 @@ if (!pass && !fail) write('tests.json', 'tests', 'unknown', 'lightgrey');
 else if (fail) write('tests.json', 'tests', `${fail} failing / ${pass + fail}`, 'red');
 else write('tests.json', 'tests', `${pass} passing`, 'brightgreen');
 
+// ---- security tests (adversarial + hygiene suites) ------------------------------
+const sec = spawnSync(process.execPath, ['--test', '--test-reporter=tap',
+  'core/test/security.test.mjs', 'server/test/security.test.js', 'test/repo-hygiene.test.mjs'], { cwd: root, encoding: 'utf8' });
+const secTap = (sec.stdout || '') + (sec.stderr || '');
+const secPass = Number(/^# pass (\d+)/m.exec(secTap)?.[1] ?? 0);
+const secFail = Number(/^# fail (\d+)/m.exec(secTap)?.[1] ?? 0);
+if (!secPass && !secFail) write('security.json', 'security tests', 'unknown', 'lightgrey');
+else if (secFail) write('security.json', 'security tests', `${secFail} failing / ${secPass + secFail}`, 'red');
+else write('security.json', 'security tests', `${secPass} checks passing`, 'brightgreen');
+
 // ---- coverage (lines / branches / functions over core/src + server/src) -------
 const cov = spawnSync(process.execPath, ['--test', '--experimental-test-coverage',
   '--test-coverage-include=core/src/**', '--test-coverage-include=server/src/**',
-  ...fs.globSync(['core/test/*.mjs', 'core/test/*.js', 'server/test/*.js'], { cwd: root })],
+  ...fs.globSync(['core/test/*.mjs', 'core/test/*.js', 'server/test/*.js', 'test/*.mjs'], { cwd: root })],
   { cwd: root, encoding: 'utf8' });
 const covLine = /^# all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m.exec((cov.stdout || '') + (cov.stderr || ''));
 if (!covLine) write('coverage.json', 'coverage', 'unknown', 'lightgrey');

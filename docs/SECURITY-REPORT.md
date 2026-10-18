@@ -179,7 +179,26 @@ in `dependabot.yml`. The server moved to Express 5.2 (path-to-regexp v8, no
 regex-based route parsing) after the full suite and both browser checks passed.
 Docker base-image major bumps for Node are ignored so the image stays on LTS.
 
-## 10. How to re-verify
+## 10. Addendum — continuous assurance (2026-10-18)
+
+The one-off review above is now backed by an automated, adversarial test suite
+and supply-chain controls that run on every pull request and weekly:
+
+| Control | Where | What it proves |
+| ------- | ----- | -------------- |
+| Adversarial API tests (20) | `server/test/security.test.js` | Parent routes refuse every request without the PIN; the PIN is accepted only from the two documented headers; path tricks, method-override headers, pairing codes and near-miss PINs are rejected; setup is single-use and unguessable; SQL/HTML in inputs is inert; prototype-pollution keys never reach storage; usage reports cannot smuggle URLs, scripts or other children; hostile JSON shapes answer 4xx; no response carries the PIN, its hash or the setup code; errors carry no internals; security headers and no-CORS hold on every response type; one child's code cannot touch another; deleting a child destroys every trace; devices can only shorten budgets; body limits, throttles and lockouts answer 4xx; static serving cannot escape the console directory. |
+| Rule-engine invariants (9) | `core/test/security.test.mjs` | Twenty-six garbage policies never crash and never yield an unconditional allow; non-object policies fail closed; the master switch cannot be undone by any field; deny beats allow regardless of casing; hostname matching has no lookalike or suffix leaks and no "local" spoofing; `getHost` refuses non-web schemes and userinfo tricks; every generated regex runs in under 50 ms on 20 kB hostile inputs; `decide()` is pure; the lock-page URL is embedded exactly once with no injectable characters. |
+| Repository tripwires (11) | `test/repo-hygiene.test.mjs` | Manifest permissions are exactly the reviewed set; no hard-coded network endpoints, `eval` or remote scripts in the extension; no inline scripts or handlers; the committed bundle matches the source; runtime dependencies are exactly those reviewed; lockfile pinned to the npm registry with integrity hashes and no third-party install scripts; no committed credentials; Dockerfile/compose/installer keep non-root, read-only, dropped capabilities and private data dirs; every workflow declares least-privilege permissions and pins actions to commit hashes; no `pull_request_target`; policy, licence and PR template present. |
+| Supply chain | `security.yml`, `scorecard.yml` | `npm audit` (runtime, blocking) and `npm audit signatures` (registry signatures + provenance); TruffleHog verified-secret scan over full history; dependency review on PRs (blocks moderate+ advisories and GPL/AGPL licences); OpenSSF Scorecard published weekly. |
+
+Writing the suite found one defect: `decide()` threw on a policy whose `allow`,
+`deny` or `offDays` was not an array. The server's validator never stores such a
+document, but a thrown decision is a fail-open path for any caller that catches
+and continues, so the engine now treats non-array fields as empty.
+
+Total automated checks: 94, of which 40 are security and hygiene assertions.
+
+## 11. How to re-verify
 
 ```bash
 npm ci

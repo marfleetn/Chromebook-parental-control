@@ -141,6 +141,8 @@ all + local allows; `minimalBlockRules()` = one block-all rule (last resort).
 
 ### 2.5 Tests
 
+`core/test/security.test.mjs` (9): fail-closed and regex-safety invariants (see
+SECURITY-REPORT §10). `test/repo-hygiene.test.mjs` (11): repository tripwires.
 `core/test/policy.test.js` (17: incl. offline usage fold, DST, helpers): parsing, windows, each decision code, local
 bypass, non-web schemes. `core/test/rules.test.mjs` (24): Chrome schema
 assertions on every rule set, both flavours, each priority band, time
@@ -245,7 +247,7 @@ for non-API GETs that accept HTML.
 | `CHPC_CORS_ORIGINS` | none | comma-separated allowed origins |
 | `CHPC_TRUST_PROXY` | off | `1` behind a reverse proxy |
 
-### 3.6 Tests (`server/test/api.test.js`, 32)
+### 3.6 Tests (`server/test/api.test.js`, 32; `server/test/security.test.js`, 20 adversarial)
 
 Auth (401/429/503, Bearer), first-run setup (code file, wrong/weak/right,
 single use, restart pickup, rate limit), PIN change (db vs env), scrypt

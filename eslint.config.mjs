@@ -18,7 +18,7 @@ export default [
 
   // Node: core, server, scripts
   {
-    files: ['core/**/*.{js,mjs}', 'server/**/*.{js,mjs}', 'scripts/**/*.{js,mjs}', 'eslint.config.mjs'],
+    files: ['core/**/*.{js,mjs}', 'server/**/*.{js,mjs}', 'scripts/**/*.{js,mjs}', 'test/**/*.{js,mjs}', 'eslint.config.mjs'],
     languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: { ...globals.node } },
     rules: common,
   },

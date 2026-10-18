@@ -3,13 +3,16 @@
 [![Tests](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
 [![Security](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
 [![Extension](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/extension.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/extension.yml)
+[![Security tests](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security-tests.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security-tests.yml)
 [![Publish](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/publish.yml)
 <br>
 [![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Ftests.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fcoverage.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/ci.yml)
 [![runtime vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
 [![all-deps vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fvulnerabilities-dev.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security.yml)
+[![security checks](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fsecurity.json)](https://github.com/marfleetn/Chromebook-parental-control/actions/workflows/security-tests.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-security--and--quality-2ea44f?logo=github)](https://github.com/marfleetn/Chromebook-parental-control/security/code-scanning)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/marfleetn/Chromebook-parental-control/badge)](https://scorecard.dev/viewer/?uri=github.com/marfleetn/Chromebook-parental-control)
 <br>
 [![extension](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmarfleetn%2FChromebook-parental-control%2Fbadges%2Fextension.json&logo=googlechrome&logoColor=white)](extension/manifest.json)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20extension-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
@@ -69,7 +72,7 @@ from the console. Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ```bash
 npm install
-npm test                    # 74 unit + integration tests (npm run test:coverage adds thresholds)
+npm test                    # 94 tests incl. the security suite (npm run test:coverage adds thresholds)
 npm run build               # console -> web/dist, extension bundle -> extension/vendor/core.js
 CHPC_PUBLIC_DIR=web/dist npm start
 ```
@@ -159,7 +162,8 @@ See [docs/SECURITY-REPORT.md](docs/SECURITY-REPORT.md) for the full assessment.
 ## Development
 
 ```bash
-npm test              # 74 tests across core and server
+npm test              # 94 tests: core, server, adversarial security suite, repo hygiene
+npm run test:security # the 40 security + hygiene checks alone
 npm run test:coverage # same, failing under 95% lines / 80% branches / 95% functions
 npm run lint          # ESLint (server, core, extension, console)
 npm run ci            # everything a pull request must pass, locally
@@ -179,19 +183,26 @@ version) are regenerated on the `badges` branch after each green run on `main`.
 | Workflow | Jobs (these are the check names) | What it proves |
 | -------- | -------------------------------- | -------------- |
 | **Tests** (`ci.yml`) | `lint`, `test (22)`, `test (24)`, `docker`, `badges` (main only) | ESLint; 74 unit + integration tests on Node 22 and 24 with coverage thresholds (95% lines, 80% branches, 95% functions); console and extension builds; committed extension bundle is current; Docker image builds, starts, prints a setup code and answers `/api/health` |
-| **Security** (`security.yml`) | `audit`, `codeql` | `npm audit` fails on any runtime advisory; CodeQL security-and-quality analysis; also weekly |
+| **Security** (`security.yml`) | `audit`, `codeql`, `secrets`, `dependency-review` | `npm audit` fails on any runtime advisory and `npm audit signatures` verifies registry signatures and provenance; CodeQL security-and-quality analysis; TruffleHog scans the whole history for verified secrets; on PRs, dependency review blocks new vulnerable or GPL/AGPL dependencies; also weekly |
+| **Security tests** (`security-tests.yml`) | `security-tests` | The adversarial suite (`npm run test:security`): authentication bypass attempts, injection and prototype pollution, information leaks, cross-child isolation, DoS limits, path traversal, rule-engine fail-closed and regex-safety invariants, and repository tripwires (manifest permissions, no phone-home, pinned actions, hardened container, dependency surface); also weekly |
+| **Scorecard** (`scorecard.yml`) | `scorecard` | OpenSSF Scorecard: independent score of supply-chain practice (pinned dependencies, token permissions, SAST, branch protection, vulnerabilities), published to scorecard.dev and the Security tab |
 | **Extension** (`extension.yml`) | `manifest`, `e2e-chromium` | Manifest V3 sanity, no inline scripts; the extension **and** the console driven end to end in a real Chromium, with screenshots and logs uploaded on failure |
 | **Publish** (`publish.yml`) | `image`, `extension` | multi-arch image to `ghcr.io/marfleetn/chromebook-parental-control` on `main`; extension zip on `v*` releases |
 
 Run the same gate locally before pushing: `npm run ci` (plus `npm run e2e:ext`
-and `npm run e2e:web` if you have Playwright).
+and `npm run e2e:web` if you have Playwright). `npm run test:security` runs the
+adversarial suite alone.
+
+Every GitHub Action is pinned to a full commit hash (Dependabot keeps the hashes
+current), every workflow declares least-privilege permissions, and a hygiene test
+fails the build if either regresses.
 
 **Making the checks mandatory.** Workflows report; only a branch ruleset blocks a
 merge. Once, as the repository owner: *Settings → Rules → Rulesets → New branch
 ruleset*; target `main`; enable **Require a pull request before merging**,
 **Require status checks to pass** with *Require branches to be up to date*, and
 add the checks `lint`, `test (22)`, `test (24)`, `docker`, `audit`, `codeql`,
-`manifest`, `e2e-chromium`; enable **Block force pushes** and **Restrict
+`secrets`, `dependency-review`, `security-tests`, `manifest`, `e2e-chromium`; enable **Block force pushes** and **Restrict
 deletions**; set enforcement to *Active*. From then on the Merge button stays
 disabled until every check is green. Dependabot's grouped PRs go through the
 same gate.
