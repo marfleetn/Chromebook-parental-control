@@ -215,3 +215,47 @@ checklist.
 ## Licence
 
 MIT — see `LICENSE`.
+
+## Disclaimer
+
+CHPC is an independent, open-source project. It is not affiliated with,
+endorsed by or supported by Google, and "Chrome", "Chromebook", "ChromeOS"
+and "Family Link" are trademarks of Google LLC.
+
+**Reasonable care, not a guarantee.** The software was designed and built for
+one purpose: to help a parent or guardian manage web access and screen time on
+a child's Chromebook in their own household. Reasonable steps have been taken
+in that design, including a documented security model, a fail-closed rule
+engine, an adversarial security test suite and automated vulnerability
+scanning that run on every change (see [Security model](#security-model) and
+[docs/SECURITY-REPORT.md](docs/SECURITY-REPORT.md)). No filtering or
+screen-time software is complete or infallible. CHPC controls Chrome web
+navigation by hostname only, depends on Chrome and ChromeOS behaviour that
+Google can change at any time, and can be disabled by a child who has the
+device permissions to do so (see [Known limits](#known-limits-read-this)). It
+is a tool to support supervision, not a substitute for it.
+
+**No warranty and no liability.** In line with the MIT licence, the software is
+provided **"as is", without warranty of any kind**, express or implied,
+including the warranties of merchantability, fitness for a particular purpose
+and non-infringement. To the fullest extent permitted by law, the author and
+contributors are **not liable for any claim, damages or other liability**,
+whether in contract, tort or otherwise, arising from or in connection with the
+software or its use, including but not limited to: content a child reaches or
+is blocked from; loss of access to websites or services; data loss, corruption
+or disclosure; device, network or account problems; and any direct, indirect,
+incidental, consequential or special loss. Nothing in this notice limits any
+liability that cannot be excluded by applicable law.
+
+**Your responsibilities.** By installing or running CHPC you accept that you
+are responsible for: deploying it only on devices and accounts you own or are
+legally entitled to supervise; keeping the guardian PIN, server and host
+operating system secure and up to date; reviewing the policies you configure;
+and complying with the laws that apply to you, including those on the
+monitoring of minors and on personal data. Browsing hostnames and usage
+minutes recorded by CHPC are personal data about your child and stay on the
+server you run; you are the controller of that data.
+
+This notice is a plain-language summary and does not replace the licence
+terms. It is not legal advice; if you intend to distribute CHPC, offer it as a
+service or use it outside a household, obtain your own legal advice.
