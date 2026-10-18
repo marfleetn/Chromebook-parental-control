@@ -81,7 +81,11 @@ The terminal prints the setup code.
 
 Open the console address in a browser. The first screen asks for the **setup
 code** and a **PIN** of your choosing (6+ characters; `123456` and the like are
-refused). The code works once; after that the PIN is the only key.
+refused), and asks you to tick a box accepting the licence and disclaimer
+(the README's [Disclaimer](../README.md#disclaimer) section: use CHPC only on
+devices you are entitled to supervise, it comes without warranty, and it
+supports supervision rather than replacing it). The code works once; after
+that the PIN is the only key.
 
 > **Choosing a PIN.** Anyone with the PIN can change every rule — it is the key to
 > the whole system. You can change it later in **Settings**. Lost it? On the

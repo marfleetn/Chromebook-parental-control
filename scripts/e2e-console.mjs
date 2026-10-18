@@ -75,6 +75,8 @@ try {
   await page.fill('#setup-code', 'zzzz-zzzz');
   await page.fill('#new-pin', PIN);
   await page.fill('#new-pin2', PIN);
+  check(await page.isDisabled('button[type=submit]'), 'setup cannot be submitted until the disclaimer is accepted');
+  await page.check('#accept-terms');
   await page.click('button[type=submit]');
   await page.waitForSelector('.banner.error');
   check(/setup code is not right/.test(await page.textContent('.banner.error')), 'wrong setup code is rejected');

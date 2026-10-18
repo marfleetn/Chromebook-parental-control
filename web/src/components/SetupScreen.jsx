@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { api } from "../api.js";
 
 const CODE_RE = /^[A-Z]{8}$/;
+// The README's Disclaimer section, which restates the MIT licence in plain language.
+const TERMS_URL = "https://github.com/marfleetn/Chromebook-parental-control#disclaimer";
 
 /**
  * First-run screen: the server has no guardian PIN yet. The parent enters the
@@ -12,11 +14,12 @@ export default function SetupScreen({ onDone, health }) {
   const [code, setCode] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
+  const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
   const normCode = code.toUpperCase().replace(/[^A-Z]/g, "");
-  const canSubmit = CODE_RE.test(normCode) && pin.length >= 6 && pin === pin2 && !busy;
+  const canSubmit = CODE_RE.test(normCode) && pin.length >= 6 && pin === pin2 && accepted && !busy;
 
   const submit = async (e) => {
     e && e.preventDefault();
@@ -66,6 +69,16 @@ export default function SetupScreen({ onDone, health }) {
           <label htmlFor="new-pin2">Repeat the PIN</label>
           <input id="new-pin2" type="password" autoComplete="new-password" value={pin2} onChange={(e) => setPin2(e.target.value)} />
           {pin && pin2 && pin !== pin2 && <div style={{ fontSize: ".82rem", color: "var(--bad)", marginTop: 6 }}>The two PINs do not match.</div>}
+
+          <label htmlFor="accept-terms" style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 14, fontSize: ".84rem", fontWeight: "normal", cursor: "pointer" }}>
+            <input id="accept-terms" type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              I will use CHPC only on devices I own or am entitled to supervise. I understand it is provided
+              <strong> as is, without warranty</strong>, that it supports supervision rather than replacing it,
+              and I accept the{" "}
+              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer">licence and disclaimer</a>.
+            </span>
+          </label>
 
           {err && <div className="banner error" style={{ marginTop: 12 }}>{err}</div>}
           <div className="row" style={{ marginTop: 16, justifyContent: "space-between" }}>
