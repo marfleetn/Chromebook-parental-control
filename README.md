@@ -72,7 +72,7 @@ from the console. Full walkthrough: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ```bash
 npm install
-npm test                    # 94 tests incl. the security suite (npm run test:coverage adds thresholds)
+npm test                    # 114 tests incl. the security suite (npm run test:coverage adds thresholds)
 npm run build               # console -> web/dist, extension bundle -> extension/vendor/core.js
 CHPC_PUBLIC_DIR=web/dist npm start
 ```
@@ -162,7 +162,7 @@ See [docs/SECURITY-REPORT.md](docs/SECURITY-REPORT.md) for the full assessment.
 ## Development
 
 ```bash
-npm test              # 94 tests: core, server, adversarial security suite, repo hygiene
+npm test              # 114 tests: core, server, adversarial security suite, repo hygiene
 npm run test:security # the 40 security + hygiene checks alone
 npm run test:coverage # same, failing under 95% lines / 80% branches / 95% functions
 npm run lint          # ESLint (server, core, extension, console)

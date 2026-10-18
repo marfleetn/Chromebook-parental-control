@@ -196,7 +196,7 @@ Writing the suite found one defect: `decide()` threw on a policy whose `allow`,
 document, but a thrown decision is a fail-open path for any caller that catches
 and continues, so the engine now treats non-array fields as empty.
 
-Total automated checks: 94, of which 40 are security and hygiene assertions.
+Total automated checks: 114, of which 40 are security and hygiene assertions.
 
 ## 11. How to re-verify
 
